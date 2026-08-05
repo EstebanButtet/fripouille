@@ -1,0 +1,34 @@
+﻿# Environnement virtuel
+.venv/
+
+# Cache Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Variables privées et secrets
+.env
+.env.local
+
+# Bases de données locales
+*.db
+*.sqlite
+*.sqlite3
+
+# Journaux
+logs/
+
+# Tests et outils
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Construction de paquets
+build/
+dist/
+*.egg-info/
+
+# Configuration locale de VS Code
+.vscode/
