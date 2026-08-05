@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from assistant_ia.core.assistant import AssistantCore
+
 APP_TITLE = "Assistant IA personnel"
 USER_PROMPT = "Vous > "
 ASSISTANT_PREFIX = "Assistant > "
@@ -35,18 +37,9 @@ def display_assistant_message(message: str) -> None:
     print(f"{ASSISTANT_PREFIX}{message}")
 
 
-def build_temporary_response(user_message: str) -> str:
-    """Build a temporary response until the assistant core is implemented."""
-    return (
-        "Message reçu : "
-        f"{user_message!r}. "
-        "Le noyau de l'assistant n'est pas encore connecté."
-    )
-
-
 def run_terminal() -> None:
     """Start and manage the interactive terminal session."""
-    conversation: list[str] = []
+    assistant = AssistantCore()
 
     display_welcome()
 
@@ -72,12 +65,11 @@ def run_terminal() -> None:
             continue
 
         if normalized_message == COMMAND_RESET:
-            conversation.clear()
+            assistant.reset_conversation()
             display_assistant_message("La conversation a été réinitialisée.")
             continue
 
-        conversation.append(user_message)
-        response = build_temporary_response(user_message)
+        response = assistant.process_message(user_message)
         display_assistant_message(response)
 
 
