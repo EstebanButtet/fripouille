@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import json
 from json import JSONDecodeError
-from typing import Protocol
+from typing import Protocol, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from assistant_ia.core.context import ConversationMessage
+from assistant_ia.intelligence.intent import (
+    ALLOWED_INTENT_NAMES,
+    Intent,
+    IntentName,
+)
 from assistant_ia.intelligence.response import ModelResponse
 
 DEFAULT_MODEL = "qwen3.5:4b"
@@ -16,6 +21,78 @@ DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_TIMEOUT = 120.0
 
 _OLLAMA_CHAT_PATH = "/api/chat"
+
+_INTENT_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "content": {
+            "type": "string",
+            "minLength": 1,
+        },
+        "intent": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "enum": sorted(ALLOWED_INTENT_NAMES),
+                },
+                "parameters": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string",
+                        "minLength": 1,
+                    },
+                },
+            },
+            "required": [
+                "name",
+                "parameters",
+            ],
+            "additionalProperties": False,
+        },
+    },
+    "required": [
+        "content",
+        "intent",
+    ],
+    "additionalProperties": False,
+}
+
+INTENT_SYSTEM_PROMPT = f"""
+You are the intent interpretation layer of a local personal assistant.
+
+Always produce a response matching the required JSON schema.
+The visible content must be written in French.
+
+Allowed intentions:
+- conversation: normal discussion, explanation or information request.
+- unknown: unsupported or genuinely ambiguous action request.
+- create_task: create or schedule a task.
+- list_tasks: list existing tasks.
+- complete_task: mark a task as completed.
+- save_memory: remember information for later.
+- find_memory: search previously saved information.
+- delete_memory: delete previously saved information.
+- write_journal: add information to a journal.
+- launch_application: open a computer application.
+
+Use conversation for ordinary dialogue.
+Use unknown only for an action request that cannot be mapped reliably.
+Never invent another intention name.
+
+No action execution capability is currently available.
+For an action intention, explain that the request was identified but not
+executed. Never claim that a task, memory, journal entry or application was
+actually created, changed, saved, deleted or launched.
+
+Extract only simple parameters explicitly supported by the user's request.
+Every parameter name and value must be a non-empty string.
+Do not invent missing dates, titles, application names or other details.
+Use an empty parameters object when no parameter is needed.
+
+Required JSON schema:
+{json.dumps(_INTENT_RESPONSE_SCHEMA, ensure_ascii=False)}
+""".strip()
 
 
 class ModelClientError(RuntimeError):
@@ -83,13 +160,23 @@ class OllamaModelClient:
             "model": self._model,
             "messages": [
                 {
-                    "role": message.role,
-                    "content": message.content,
-                }
-                for message in messages
+                    "role": "system",
+                    "content": INTENT_SYSTEM_PROMPT,
+                },
+                *[
+                    {
+                        "role": message.role,
+                        "content": message.content,
+                    }
+                    for message in messages
+                ],
             ],
+            "format": _INTENT_RESPONSE_SCHEMA,
             "stream": False,
             "think": False,
+            "options": {
+                "temperature": 0,
+            },
         }
 
         request_data = json.dumps(
@@ -150,12 +237,53 @@ class OllamaModelClient:
                 "Ollama response does not contain a valid message."
             )
 
+        structured_content = message_data.get("content")
+
+        if not isinstance(structured_content, str):
+            raise ModelClientError(
+                "Ollama response message does not contain valid content."
+            )
+
         try:
+            structured_data = json.loads(structured_content)
+        except JSONDecodeError as error:
+            raise ModelClientError(
+                "Ollama returned invalid structured content."
+            ) from error
+
+        if not isinstance(structured_data, dict):
+            raise ModelClientError(
+                "Ollama structured content must be an object."
+            )
+
+        if set(structured_data) != {"content", "intent"}:
+            raise ModelClientError(
+                "Ollama structured content contains invalid fields."
+            )
+
+        intent_data = structured_data.get("intent")
+
+        if not isinstance(intent_data, dict):
+            raise ModelClientError(
+                "Ollama structured content does not contain a valid intent."
+            )
+
+        if set(intent_data) != {"name", "parameters"}:
+            raise ModelClientError(
+                "Ollama intent contains invalid fields."
+            )
+
+        try:
+            intent = Intent(
+                name=cast(IntentName, intent_data.get("name")),
+                parameters=intent_data.get("parameters"),
+            )
             return ModelResponse(
-                content=message_data.get("content"),
+                content=structured_data.get("content"),
                 model=response_data.get("model"),
+                intent=intent,
             )
         except (TypeError, ValueError) as error:
             raise ModelClientError(
-                "Ollama returned an invalid model response."
+                "Ollama returned an invalid structured model response."
             ) from error

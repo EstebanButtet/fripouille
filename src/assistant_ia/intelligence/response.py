@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from assistant_ia.intelligence.intent import Intent
+
 
 @dataclass(frozen=True, slots=True)
 class ModelResponse:
@@ -11,6 +13,7 @@ class ModelResponse:
 
     content: str
     model: str
+    intent: Intent
 
     def __post_init__(self) -> None:
         """Validate and normalize the response fields."""
@@ -19,6 +22,9 @@ class ModelResponse:
 
         if not isinstance(self.model, str):
             raise TypeError("Model name must be a string.")
+
+        if not isinstance(self.intent, Intent):
+            raise TypeError("Model response intent must be an Intent.")
 
         normalized_content = self.content.strip()
         normalized_model = self.model.strip()
