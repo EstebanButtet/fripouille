@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from assistant_ia.core.assistant import AssistantCore, AssistantCoreError
+from assistant_ia.application import (
+    ApplicationInitializationError,
+    build_default_assistant,
+)
+from assistant_ia.core.assistant import AssistantCoreError
 
 APP_TITLE = "Assistant IA personnel"
 USER_PROMPT = "Vous > "
@@ -15,6 +19,11 @@ COMMAND_QUIT = "/quit"
 MODEL_ERROR_MESSAGE = (
     "Le modèle local n'a pas pu produire de réponse. "
     "Vérifiez qu'Ollama est démarré et que le modèle configuré est installé."
+)
+
+DATABASE_ERROR_MESSAGE = (
+    "La base de données locale n'a pas pu être initialisée. "
+    "Vérifiez les droits d'accès au dossier de données de l'application."
 )
 
 
@@ -44,9 +53,15 @@ def display_assistant_message(message: str) -> None:
 
 def run_terminal() -> None:
     """Start and manage the interactive terminal session."""
-    assistant = AssistantCore()
-
     display_welcome()
+
+    try:
+        assistant = build_default_assistant()
+    except ApplicationInitializationError:
+        display_assistant_message(
+            DATABASE_ERROR_MESSAGE
+        )
+        return
 
     while True:
         try:
@@ -72,14 +87,20 @@ def run_terminal() -> None:
                 )
                 continue
 
-            response = assistant.process_message(user_message)
+            response = assistant.process_message(
+                user_message
+            )
             display_assistant_message(response)
         except (KeyboardInterrupt, EOFError):
             print()
-            display_assistant_message("Arrêt demandé. À bientôt.")
+            display_assistant_message(
+                "Arrêt demandé. À bientôt."
+            )
             break
         except AssistantCoreError:
-            display_assistant_message(MODEL_ERROR_MESSAGE)
+            display_assistant_message(
+                MODEL_ERROR_MESSAGE
+            )
 
 
 if __name__ == "__main__":

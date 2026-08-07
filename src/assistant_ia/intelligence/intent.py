@@ -20,19 +20,128 @@ IntentName = Literal[
     "launch_application",
 ]
 
-ALLOWED_INTENT_NAMES: frozenset[str] = frozenset(
+
+@dataclass(frozen=True, slots=True)
+class IntentParameterSpecification:
+    """Define the authorized parameters for one intent."""
+
+    required: frozenset[str] = field(default_factory=frozenset)
+    optional: frozenset[str] = field(default_factory=frozenset)
+
+    def __post_init__(self) -> None:
+        """Validate that the parameter contract is internally coherent."""
+        if not isinstance(self.required, frozenset):
+            raise TypeError(
+                "Required intent parameters must be a frozenset."
+            )
+
+        if not isinstance(self.optional, frozenset):
+            raise TypeError(
+                "Optional intent parameters must be a frozenset."
+            )
+
+        for parameter_name in self.required | self.optional:
+            if not isinstance(parameter_name, str):
+                raise TypeError(
+                    "Intent parameter specification names must be strings."
+                )
+
+            if not parameter_name.strip():
+                raise ValueError(
+                    "Intent parameter specification names cannot be empty."
+                )
+
+            if parameter_name != parameter_name.strip():
+                raise ValueError(
+                    "Intent parameter specification names must be normalized."
+                )
+
+        overlapping_parameters = self.required & self.optional
+
+        if overlapping_parameters:
+            raise ValueError(
+                "Intent parameters cannot be both required and optional."
+            )
+
+
+INTENT_PARAMETER_SPECIFICATIONS: Mapping[
+    IntentName,
+    IntentParameterSpecification,
+] = MappingProxyType(
     {
-        "conversation",
-        "unknown",
-        "create_task",
-        "list_tasks",
-        "complete_task",
-        "save_memory",
-        "find_memory",
-        "delete_memory",
-        "write_journal",
-        "launch_application",
+        "conversation": IntentParameterSpecification(),
+        "unknown": IntentParameterSpecification(),
+        "create_task": IntentParameterSpecification(
+            required=frozenset(
+                {
+                    "title",
+                }
+            ),
+            optional=frozenset(
+                {
+                    "due_at",
+                }
+            ),
+        ),
+        "list_tasks": IntentParameterSpecification(
+            optional=frozenset(
+                {
+                    "status",
+                }
+            ),
+        ),
+        "complete_task": IntentParameterSpecification(
+            required=frozenset(
+                {
+                    "task_id",
+                }
+            ),
+        ),
+        "save_memory": IntentParameterSpecification(
+            required=frozenset(
+                {
+                    "content",
+                }
+            ),
+        ),
+        "find_memory": IntentParameterSpecification(
+            required=frozenset(
+                {
+                    "query",
+                }
+            ),
+        ),
+        "delete_memory": IntentParameterSpecification(
+            required=frozenset(
+                {
+                    "memory_id",
+                }
+            ),
+        ),
+        "write_journal": IntentParameterSpecification(
+            required=frozenset(
+                {
+                    "content",
+                }
+            ),
+            optional=frozenset(
+                {
+                    "entry_date",
+                }
+            ),
+        ),
+        "launch_application": IntentParameterSpecification(
+            required=frozenset(
+                {
+                    "application",
+                }
+            ),
+        ),
     }
+)
+
+ALLOWED_INTENT_NAMES: frozenset[str] = frozenset(
+    INTENT_PARAMETER_SPECIFICATIONS
 )
 
 
@@ -91,4 +200,3 @@ class Intent:
             "parameters",
             MappingProxyType(normalized_parameters),
         )
-        

@@ -281,7 +281,7 @@ class SQLiteDatabaseConnectionTests(unittest.TestCase):
 
 
 class SQLiteDatabaseInitializationTests(unittest.TestCase):
-    """Validate technical schema initialization and versioning."""
+    """Validate schema initialization, migration and versioning."""
 
     def setUp(self) -> None:
         """Create a separate temporary database path for each test."""
@@ -296,8 +296,56 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
         """Remove the temporary database and its directory."""
         self.temporary_directory.cleanup()
 
-    def test_initialize_creates_schema_version(self) -> None:
-        """Initialization should create and record the current schema."""
+    def _create_version_one_schema(self) -> None:
+        """Create the technical schema used before business migrations."""
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE schema_version (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    version INTEGER NOT NULL CHECK (version >= 1)
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO schema_version (id, version)
+                VALUES (?, ?)
+                """,
+                (1, 1),
+            )
+
+    def _table_names(self) -> list[tuple[str]]:
+        """Return all non-internal table names in deterministic order."""
+        with self.database.connect() as connection:
+            return connection.execute(
+                """
+                SELECT name
+                FROM sqlite_master
+                WHERE type = ?
+                  AND name NOT LIKE ?
+                ORDER BY name
+                """,
+                ("table", "sqlite_%"),
+            ).fetchall()
+
+    def _table_exists(self, table_name: str) -> bool:
+        """Return whether one table exists in the temporary database."""
+        with self.database.connect() as connection:
+            result = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type = ?
+                  AND name = ?
+                """,
+                ("table", table_name),
+            ).fetchone()
+
+        return result == (1,)
+
+    def test_initialize_creates_current_schema_version(self) -> None:
+        """A fresh database should directly reach the current version."""
         self.database.initialize()
 
         with self.database.connect() as connection:
@@ -313,38 +361,144 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
             (1, CURRENT_SCHEMA_VERSION),
         )
 
-    def test_initialize_is_idempotent(self) -> None:
-        """Repeated initialization should not duplicate schema metadata."""
+    def test_initialize_creates_business_tables(self) -> None:
+        """A fresh database should contain all required business tables."""
         self.database.initialize()
+
+        self.assertEqual(
+            self._table_names(),
+            [
+                ("journal_entries",),
+                ("memories",),
+                ("schema_version",),
+                ("tasks",),
+            ],
+        )
+
+    def test_migrates_version_one_database(self) -> None:
+        """A version one database should receive the business tables."""
+        self._create_version_one_schema()
+
+        self.database.initialize()
+
+        self.assertTrue(self._table_exists("tasks"))
+        self.assertTrue(self._table_exists("memories"))
+        self.assertTrue(self._table_exists("journal_entries"))
+
+    def test_migration_updates_schema_version(self) -> None:
+        """A successful migration should update its metadata version."""
+        self._create_version_one_schema()
+
         self.database.initialize()
 
         with self.database.connect() as connection:
-            result = connection.execute(
-                "SELECT COUNT(*) FROM schema_version"
+            version_row = connection.execute(
+                """
+                SELECT version
+                FROM schema_version
+                WHERE id = ?
+                """,
+                (1,),
             ).fetchone()
 
-        self.assertEqual(result, (1,))
+        self.assertEqual(
+            version_row,
+            (CURRENT_SCHEMA_VERSION,),
+        )
 
-    def test_initialize_creates_only_technical_schema(self) -> None:
-        """Step 7 should not create future business tables."""
+    def test_initialize_is_idempotent(self) -> None:
+        """Repeated initialization should not alter a current schema."""
+        self.database.initialize()
         self.database.initialize()
 
         with self.database.connect() as connection:
-            tables = connection.execute(
+            version_count = connection.execute(
                 """
-                SELECT name
-                FROM sqlite_master
-                WHERE type = ?
-                  AND name NOT LIKE ?
-                ORDER BY name
+                SELECT COUNT(*)
+                FROM schema_version
+                """
+            ).fetchone()
+
+        self.assertEqual(version_count, (1,))
+        self.assertEqual(
+            self._table_names(),
+            [
+                ("journal_entries",),
+                ("memories",),
+                ("schema_version",),
+                ("tasks",),
+            ],
+        )
+
+    def test_migration_preserves_existing_data(self) -> None:
+        """Migrating should not remove unrelated existing data."""
+        self._create_version_one_schema()
+
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE legacy_items (
+                    id INTEGER PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO legacy_items (value)
+                VALUES (?)
                 """,
-                ("table", "sqlite_%"),
-            ).fetchall()
+                ("preserved",),
+            )
 
-        self.assertEqual(tables, [("schema_version",)])
+        self.database.initialize()
 
-    def test_rejects_unsupported_schema_version(self) -> None:
-        """Databases using another schema version should be rejected."""
+        with self.database.connect() as connection:
+            preserved_row = connection.execute(
+                """
+                SELECT value
+                FROM legacy_items
+                """
+            ).fetchone()
+
+        self.assertEqual(preserved_row, ("preserved",))
+
+    def test_migration_rolls_back_on_error(self) -> None:
+        """A failed migration should roll back all of its changes."""
+        self._create_version_one_schema()
+
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE memories (
+                    id INTEGER PRIMARY KEY
+                )
+                """
+            )
+
+        with self.assertRaisesRegex(
+            DatabaseError,
+            "SQLite database operation failed",
+        ):
+            self.database.initialize()
+
+        with self.database.connect() as connection:
+            version_row = connection.execute(
+                """
+                SELECT version
+                FROM schema_version
+                WHERE id = ?
+                """,
+                (1,),
+            ).fetchone()
+
+        self.assertEqual(version_row, (1,))
+        self.assertFalse(self._table_exists("tasks"))
+        self.assertTrue(self._table_exists("memories"))
+        self.assertFalse(self._table_exists("journal_entries"))
+
+    def test_rejects_future_schema_version(self) -> None:
+        """A database from a future version should be rejected."""
         with self.database.connect() as connection:
             connection.execute(
                 """
@@ -359,7 +513,10 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 INSERT INTO schema_version (id, version)
                 VALUES (?, ?)
                 """,
-                (1, CURRENT_SCHEMA_VERSION + 1),
+                (
+                    1,
+                    CURRENT_SCHEMA_VERSION + 1,
+                ),
             )
 
         with self.assertRaisesRegex(
@@ -368,8 +525,8 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
         ):
             self.database.initialize()
 
-    def test_converts_invalid_schema_table_error(self) -> None:
-        """Malformed technical schema should become a database error."""
+    def test_rejects_malformed_technical_schema(self) -> None:
+        """Malformed technical metadata should become a database error."""
         with self.database.connect() as connection:
             connection.execute(
                 """
@@ -389,6 +546,45 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
             raised_error.exception.__cause__,
             sqlite3.Error,
         )
+
+    def test_rejects_incomplete_current_business_schema(self) -> None:
+        """A current version without its business tables is malformed."""
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE schema_version (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    version INTEGER NOT NULL CHECK (version >= 1)
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO schema_version (id, version)
+                VALUES (?, ?)
+                """,
+                (
+                    1,
+                    CURRENT_SCHEMA_VERSION,
+                ),
+            )
+
+        with self.assertRaisesRegex(
+            DatabaseError,
+            "Malformed database business schema",
+        ):
+            self.database.initialize()
+
+    def test_foreign_keys_remain_enabled_after_initialization(self) -> None:
+        """Schema initialization should preserve foreign key enforcement."""
+        self.database.initialize()
+
+        with self.database.connect() as connection:
+            foreign_keys_status = connection.execute(
+                "PRAGMA foreign_keys"
+            ).fetchone()
+
+        self.assertEqual(foreign_keys_status, (1,))
 
 
 if __name__ == "__main__":

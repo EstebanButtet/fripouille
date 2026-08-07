@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import unittest
 
-from assistant_ia.intelligence.intent import Intent
+from assistant_ia.intelligence.intent import (
+    ALLOWED_INTENT_NAMES,
+    INTENT_PARAMETER_SPECIFICATIONS,
+    Intent,
+)
 from assistant_ia.intelligence.response import ModelResponse
 
 
@@ -15,7 +19,7 @@ class IntentTests(unittest.TestCase):
         """Intent parameters should be normalized, copied and immutable."""
         source_parameters = {
             "title": " Réviser la biologie ",
-            "date": " demain ",
+            "due_at": " demain ",
         }
 
         intent = Intent(
@@ -30,7 +34,7 @@ class IntentTests(unittest.TestCase):
             dict(intent.parameters),
             {
                 "title": "Réviser la biologie",
-                "date": "demain",
+                "due_at": "demain",
             },
         )
 
@@ -73,6 +77,41 @@ class IntentTests(unittest.TestCase):
                 name="create_task",
                 parameters={"title": "   "},
             )
+
+    def test_parameter_specifications_cover_allowed_intents(self) -> None:
+        """Every allowed intent should have one parameter contract."""
+        self.assertEqual(
+            frozenset(INTENT_PARAMETER_SPECIFICATIONS),
+            ALLOWED_INTENT_NAMES,
+        )
+
+        for specification in INTENT_PARAMETER_SPECIFICATIONS.values():
+            self.assertTrue(
+                specification.required.isdisjoint(
+                    specification.optional
+                )
+            )
+
+    def test_create_task_parameter_specification(self) -> None:
+        """Task creation should expose its exact parameter contract."""
+        specification = INTENT_PARAMETER_SPECIFICATIONS["create_task"]
+
+        self.assertEqual(
+            specification.required,
+            frozenset(
+                {
+                    "title",
+                }
+            ),
+        )
+        self.assertEqual(
+            specification.optional,
+            frozenset(
+                {
+                    "due_at",
+                }
+            ),
+        )
 
 
 class ModelResponseTests(unittest.TestCase):

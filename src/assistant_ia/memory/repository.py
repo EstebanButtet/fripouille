@@ -11,7 +11,36 @@ from typing import Iterator
 
 DEFAULT_DATABASE_DIRECTORY_NAME = "assistant-ia"
 DEFAULT_DATABASE_FILENAME = "assistant_ia.db"
-CURRENT_SCHEMA_VERSION = 1
+
+_INITIAL_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
+
+_SCHEMA_VERSION_COLUMNS = (
+    ("id", "INTEGER", 0, 1),
+    ("version", "INTEGER", 1, 0),
+)
+
+_BUSINESS_TABLE_COLUMNS = {
+    "tasks": (
+        ("id", "INTEGER", 0, 1),
+        ("title", "TEXT", 1, 0),
+        ("due_at", "TEXT", 0, 0),
+        ("status", "TEXT", 1, 0),
+        ("created_at", "TEXT", 1, 0),
+        ("completed_at", "TEXT", 0, 0),
+    ),
+    "memories": (
+        ("id", "INTEGER", 0, 1),
+        ("content", "TEXT", 1, 0),
+        ("created_at", "TEXT", 1, 0),
+    ),
+    "journal_entries": (
+        ("id", "INTEGER", 0, 1),
+        ("content", "TEXT", 1, 0),
+        ("entry_date", "TEXT", 1, 0),
+        ("created_at", "TEXT", 1, 0),
+    ),
+}
 
 
 class DatabaseError(RuntimeError):
@@ -83,40 +112,219 @@ class SQLiteDatabase:
                 connection.close()
 
     def initialize(self) -> None:
-        """Create and validate the current technical database schema."""
+        """Create, migrate and validate the current database schema."""
         with self.connect() as connection:
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS schema_version (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    version INTEGER NOT NULL CHECK (version >= 1)
-                )
-                """
-            )
-            connection.execute(
-                """
-                INSERT OR IGNORE INTO schema_version (id, version)
-                VALUES (?, ?)
-                """,
-                (1, CURRENT_SCHEMA_VERSION),
-            )
+            connection.execute("BEGIN")
 
-            version_row = connection.execute(
-                """
-                SELECT version
-                FROM schema_version
-                WHERE id = ?
-                """,
-                (1,),
-            ).fetchone()
+            _create_technical_schema(connection)
+            schema_version = _read_schema_version(connection)
 
-            if (
-                version_row is None
-                or version_row[0] != CURRENT_SCHEMA_VERSION
-            ):
+            if schema_version > CURRENT_SCHEMA_VERSION:
                 raise DatabaseError(
                     "Unsupported database schema version."
                 )
+
+            while schema_version < CURRENT_SCHEMA_VERSION:
+                migration = _SCHEMA_MIGRATIONS.get(schema_version)
+
+                if migration is None:
+                    raise DatabaseError(
+                        "Unsupported database schema version."
+                    )
+
+                migration(connection)
+
+                next_version = schema_version + 1
+                update_cursor = connection.execute(
+                    """
+                    UPDATE schema_version
+                    SET version = ?
+                    WHERE id = ?
+                      AND version = ?
+                    """,
+                    (
+                        next_version,
+                        1,
+                        schema_version,
+                    ),
+                )
+
+                if update_cursor.rowcount != 1:
+                    raise DatabaseError(
+                        "Database schema version could not be updated."
+                    )
+
+                schema_version = next_version
+
+            _validate_current_business_schema(connection)
+
+
+def _create_technical_schema(
+    connection: sqlite3.Connection,
+) -> None:
+    """Create and validate the technical schema metadata."""
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS schema_version (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            version INTEGER NOT NULL CHECK (version >= 1)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO schema_version (id, version)
+        VALUES (?, ?)
+        """,
+        (
+            1,
+            _INITIAL_SCHEMA_VERSION,
+        ),
+    )
+
+    if _table_columns(connection, "schema_version") != (
+        _SCHEMA_VERSION_COLUMNS
+    ):
+        raise DatabaseError(
+            "Malformed database schema metadata."
+        )
+
+
+def _read_schema_version(
+    connection: sqlite3.Connection,
+) -> int:
+    """Return the single validated schema version."""
+    version_rows = connection.execute(
+        """
+        SELECT id, version
+        FROM schema_version
+        ORDER BY id
+        """
+    ).fetchall()
+
+    if len(version_rows) != 1:
+        raise DatabaseError(
+            "Malformed database schema metadata."
+        )
+
+    row_id, schema_version = version_rows[0]
+
+    if (
+        row_id != 1
+        or not isinstance(schema_version, int)
+        or schema_version < _INITIAL_SCHEMA_VERSION
+    ):
+        raise DatabaseError(
+            "Malformed database schema metadata."
+        )
+
+    return schema_version
+
+
+def _migrate_schema_1_to_2(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add the initial task, memory and journal business tables."""
+    connection.execute(
+        """
+        CREATE TABLE tasks (
+            id INTEGER PRIMARY KEY,
+            title TEXT NOT NULL
+                CHECK (length(trim(title)) > 0),
+            due_at TEXT,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'completed')),
+            created_at TEXT NOT NULL
+                CHECK (length(trim(created_at)) > 0),
+            completed_at TEXT,
+            CHECK (
+                (
+                    status = 'pending'
+                    AND completed_at IS NULL
+                )
+                OR
+                (
+                    status = 'completed'
+                    AND completed_at IS NOT NULL
+                )
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE memories (
+            id INTEGER PRIMARY KEY,
+            content TEXT NOT NULL
+                CHECK (length(trim(content)) > 0),
+            created_at TEXT NOT NULL
+                CHECK (length(trim(created_at)) > 0)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE journal_entries (
+            id INTEGER PRIMARY KEY,
+            content TEXT NOT NULL
+                CHECK (length(trim(content)) > 0),
+            entry_date TEXT NOT NULL
+                CHECK (length(trim(entry_date)) > 0),
+            created_at TEXT NOT NULL
+                CHECK (length(trim(created_at)) > 0)
+        )
+        """
+    )
+
+
+def _validate_current_business_schema(
+    connection: sqlite3.Connection,
+) -> None:
+    """Validate the required business table structures."""
+    for table_name, expected_columns in _BUSINESS_TABLE_COLUMNS.items():
+        if _table_columns(connection, table_name) != expected_columns:
+            raise DatabaseError(
+                "Malformed database business schema."
+            )
+
+
+def _table_columns(
+    connection: sqlite3.Connection,
+    table_name: str,
+) -> tuple[tuple[str, str, int, int], ...]:
+    """Return the normalized column structure of an internal table."""
+    column_rows = connection.execute(
+        """
+        SELECT
+            name,
+            upper(type),
+            "notnull",
+            pk
+        FROM pragma_table_info(?)
+        ORDER BY cid
+        """,
+        (table_name,),
+    ).fetchall()
+
+    return tuple(
+        (
+            column_name,
+            column_type,
+            not_null,
+            primary_key,
+        )
+        for (
+            column_name,
+            column_type,
+            not_null,
+            primary_key,
+        ) in column_rows
+    )
+
+
+_SCHEMA_MIGRATIONS = {
+    1: _migrate_schema_1_to_2,
+}
 
 
 def _normalize_database_path(

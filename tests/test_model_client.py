@@ -85,7 +85,8 @@ class OllamaModelClientTests(unittest.TestCase):
                 "intent": {
                     "name": "create_task",
                     "parameters": {
-                        "date": "demain",
+                        "title": "Réviser la biologie",
+                        "due_at": "demain",
                     },
                 },
             }
@@ -105,7 +106,10 @@ class OllamaModelClientTests(unittest.TestCase):
         self.assertEqual(response.intent.name, "create_task")
         self.assertEqual(
             dict(response.intent.parameters),
-            {"date": "demain"},
+            {
+                "title": "Réviser la biologie",
+                "due_at": "demain",
+            },
         )
 
     def test_sends_system_prompt_and_structured_schema(self) -> None:
@@ -169,6 +173,46 @@ class OllamaModelClientTests(unittest.TestCase):
         self.assertEqual(
             request_data["format"]["type"],
             "object",
+        )
+
+    def test_system_prompt_defines_parameter_contract(self) -> None:
+        """The system prompt should define safe action parameters."""
+        self.assertIn(
+            'create_task: required parameter "title"; '
+            'optional parameter "due_at"',
+            INTENT_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            'complete_task: required parameter "task_id"',
+            INTENT_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            'delete_memory: required parameter "memory_id"',
+            INTENT_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "never claim that a task, memory, journal entry or",
+            INTENT_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "Never produce SQL",
+            INTENT_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "task_id and memory_id must contain only ASCII digits",
+            INTENT_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "Never omit content for a write_journal intent",
+            INTENT_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            '"content": "TEST E8 journal local."',
+            INTENT_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            '"entry_date": "2026-08-07"',
+            INTENT_SYSTEM_PROMPT,
         )
 
     def test_rejects_invalid_outer_json(self) -> None:
