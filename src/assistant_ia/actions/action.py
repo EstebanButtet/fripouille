@@ -21,6 +21,7 @@ ExecutableIntentName = Literal[
     "find_memory",
     "delete_memory",
     "write_journal",
+    "launch_application",
 ]
 
 EXECUTABLE_INTENT_NAMES: frozenset[str] = frozenset(
@@ -32,6 +33,7 @@ EXECUTABLE_INTENT_NAMES: frozenset[str] = frozenset(
         "find_memory",
         "delete_memory",
         "write_journal",
+        "launch_application",
     }
 )
 

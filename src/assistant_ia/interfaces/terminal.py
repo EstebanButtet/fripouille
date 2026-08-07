@@ -7,6 +7,7 @@ from assistant_ia.application import (
     build_default_assistant,
 )
 from assistant_ia.core.assistant import AssistantCoreError
+from assistant_ia.security.confirmation import ConfirmationRequest
 
 APP_TITLE = "Assistant IA personnel"
 USER_PROMPT = "Vous > "
@@ -51,12 +52,33 @@ def display_assistant_message(message: str) -> None:
     print(f"{ASSISTANT_PREFIX}{message}")
 
 
+def request_terminal_confirmation(
+    request: ConfirmationRequest,
+) -> bool:
+    """Request explicit confirmation from the terminal user."""
+    if not isinstance(request, ConfirmationRequest):
+        raise TypeError(
+            "Terminal confirmation requires a ConfirmationRequest."
+        )
+
+    response = input(
+        f"Confirmer : {request.description} ? [o/N] "
+    ).strip().casefold()
+
+    return response in {
+        "o",
+        "oui",
+    }
+
+
 def run_terminal() -> None:
     """Start and manage the interactive terminal session."""
     display_welcome()
 
     try:
-        assistant = build_default_assistant()
+        assistant = build_default_assistant(
+            confirmation_handler=request_terminal_confirmation,
+        )
     except ApplicationInitializationError:
         display_assistant_message(
             DATABASE_ERROR_MESSAGE

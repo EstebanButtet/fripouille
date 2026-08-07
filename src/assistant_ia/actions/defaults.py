@@ -1,4 +1,4 @@
-"""Default persistent actions for the local assistant."""
+"""Default executable actions for the local assistant."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ from typing import cast
 
 from assistant_ia.actions.action import (
     Action,
+    ActionExecutionError,
     ActionValidationError,
 )
 from assistant_ia.actions.registry import ActionRegistry
@@ -24,6 +25,21 @@ from assistant_ia.memory.models import (
     TaskStatus,
 )
 from assistant_ia.memory.task_repository import TaskRepository
+from assistant_ia.security.confirmation import (
+    ConfirmationHandler,
+    ConfirmationRequest,
+    deny_confirmation,
+    request_confirmation,
+)
+from assistant_ia.security.permissions import (
+    PermissionPolicy,
+    build_default_permission_policy,
+)
+from assistant_ia.system.windows import (
+    WindowsApplicationLaunchError,
+    WindowsApplicationLauncher,
+    WindowsApplicationNotAllowedError,
+)
 
 
 class _BusinessActionHandlers:
@@ -196,13 +212,92 @@ class _BusinessActionHandlers:
         )
 
 
+class _SystemActionHandlers:
+    """Execute controlled system assistant actions."""
+
+    def __init__(
+        self,
+        permission_policy: PermissionPolicy,
+        confirmation_handler: ConfirmationHandler,
+        windows_launcher: WindowsApplicationLauncher,
+    ) -> None:
+        """Store the security and Windows dependencies."""
+        self._permission_policy = permission_policy
+        self._confirmation_handler = confirmation_handler
+        self._windows_launcher = windows_launcher
+
+    def launch_application(
+        self,
+        parameters: Mapping[str, str],
+    ) -> str:
+        """Launch one explicitly allowlisted Windows application."""
+        try:
+            application = self._windows_launcher.resolve_application(
+                parameters["application"]
+            )
+        except WindowsApplicationNotAllowedError as error:
+            raise ActionValidationError(
+                "Cette application n’est pas autorisée."
+            ) from error
+
+        decision = self._permission_policy.decision_for(
+            "launch_application"
+        )
+
+        if decision == "denied":
+            raise ActionValidationError(
+                "Le lancement d’applications n’est pas autorisé."
+            )
+
+        if decision == "confirmation_required":
+            request = ConfirmationRequest(
+                action_name="launch_application",
+                description=(
+                    f"lancer {application.display_name}"
+                ),
+            )
+
+            try:
+                confirmed = request_confirmation(
+                    self._confirmation_handler,
+                    request,
+                )
+            except TypeError as error:
+                raise ActionExecutionError(
+                    "La confirmation de l’action a échoué."
+                ) from error
+
+            if not confirmed:
+                return (
+                    f"Lancement annulé : "
+                    f"{application.display_name}."
+                )
+
+        try:
+            launched_application = self._windows_launcher.launch(
+                application.name
+            )
+        except WindowsApplicationLaunchError as error:
+            raise ActionExecutionError(
+                "L’application n’a pas pu être lancée."
+            ) from error
+
+        return (
+            f"Application lancée : "
+            f"{launched_application.display_name}."
+        )
+
+
 def build_default_action_registry(
     task_repository: TaskRepository,
     memory_repository: MemoryRepository,
     journal_repository: JournalRepository,
     current_date: Callable[[], date] | None = None,
+    permission_policy: PermissionPolicy | None = None,
+    confirmation_handler: ConfirmationHandler | None = None,
+    windows_launcher: WindowsApplicationLauncher | None = None,
 ) -> ActionRegistry:
-    """Build the seven persistent actions supported by the assistant."""
+    """Build the explicitly available assistant actions."""
     if not isinstance(task_repository, TaskRepository):
         raise TypeError(
             "Default actions require a TaskRepository."
@@ -223,7 +318,34 @@ def build_default_action_registry(
             "Default action current date provider must be callable."
         )
 
-    handlers = _BusinessActionHandlers(
+    if (
+        permission_policy is not None
+        and not isinstance(permission_policy, PermissionPolicy)
+    ):
+        raise TypeError(
+            "Default actions require a PermissionPolicy."
+        )
+
+    if (
+        confirmation_handler is not None
+        and not callable(confirmation_handler)
+    ):
+        raise TypeError(
+            "Default action confirmation handler must be callable."
+        )
+
+    if (
+        windows_launcher is not None
+        and not isinstance(
+            windows_launcher,
+            WindowsApplicationLauncher,
+        )
+    ):
+        raise TypeError(
+            "Default actions require a WindowsApplicationLauncher."
+        )
+
+    business_handlers = _BusinessActionHandlers(
         task_repository=task_repository,
         memory_repository=memory_repository,
         journal_repository=journal_repository,
@@ -234,37 +356,61 @@ def build_default_action_registry(
         ),
     )
 
-    return ActionRegistry(
-        actions=(
-            Action(
-                name="create_task",
-                handler=handlers.create_task,
+    actions = [
+        Action(
+            name="create_task",
+            handler=business_handlers.create_task,
+        ),
+        Action(
+            name="list_tasks",
+            handler=business_handlers.list_tasks,
+        ),
+        Action(
+            name="complete_task",
+            handler=business_handlers.complete_task,
+        ),
+        Action(
+            name="save_memory",
+            handler=business_handlers.save_memory,
+        ),
+        Action(
+            name="find_memory",
+            handler=business_handlers.find_memory,
+        ),
+        Action(
+            name="delete_memory",
+            handler=business_handlers.delete_memory,
+        ),
+        Action(
+            name="write_journal",
+            handler=business_handlers.write_journal,
+        ),
+    ]
+
+    if windows_launcher is not None:
+        system_handlers = _SystemActionHandlers(
+            permission_policy=(
+                permission_policy
+                if permission_policy is not None
+                else build_default_permission_policy()
             ),
-            Action(
-                name="list_tasks",
-                handler=handlers.list_tasks,
+            confirmation_handler=(
+                confirmation_handler
+                if confirmation_handler is not None
+                else deny_confirmation
             ),
-            Action(
-                name="complete_task",
-                handler=handlers.complete_task,
-            ),
-            Action(
-                name="save_memory",
-                handler=handlers.save_memory,
-            ),
-            Action(
-                name="find_memory",
-                handler=handlers.find_memory,
-            ),
-            Action(
-                name="delete_memory",
-                handler=handlers.delete_memory,
-            ),
-            Action(
-                name="write_journal",
-                handler=handlers.write_journal,
-            ),
+            windows_launcher=windows_launcher,
         )
+
+        actions.append(
+            Action(
+                name="launch_application",
+                handler=system_handlers.launch_application,
+            )
+        )
+
+    return ActionRegistry(
+        actions=actions
     )
 
 

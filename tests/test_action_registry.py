@@ -159,8 +159,8 @@ class ActionRegistryTests(unittest.TestCase):
                 )
             )
 
-    def test_keeps_launch_application_blocked(self) -> None:
-        """Application launching should remain unavailable."""
+    def test_requires_launch_application_registration(self) -> None:
+        """Application launching should require explicit registration."""
         registry = ActionRegistry()
 
         with self.assertRaisesRegex(

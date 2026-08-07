@@ -193,8 +193,10 @@ class AssistantCoreTests(unittest.TestCase):
             assistant.context.messages[-1].content,
         )
 
-    def test_keeps_launch_application_blocked(self) -> None:
-        """Application launching should remain unavailable."""
+    def test_requires_registered_launch_application_action(
+        self,
+    ) -> None:
+        """Launching should remain unavailable without registration."""
         intent = Intent(
             name="launch_application",
             parameters={

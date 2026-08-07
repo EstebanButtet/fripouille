@@ -11,9 +11,11 @@ from assistant_ia.application import (
     ApplicationInitializationError,
 )
 from assistant_ia.core.assistant import AssistantCoreError
+from assistant_ia.security.confirmation import ConfirmationRequest
 from assistant_ia.interfaces.terminal import (
     DATABASE_ERROR_MESSAGE,
     MODEL_ERROR_MESSAGE,
+    request_terminal_confirmation,
     run_terminal,
 )
 
@@ -72,6 +74,66 @@ class FailingAssistant:
 class TerminalTests(unittest.TestCase):
     """Validate terminal assembly and command handling."""
 
+    def test_terminal_confirmation_accepts_french_yes(
+        self,
+    ) -> None:
+        """Only explicit French affirmative answers should confirm."""
+        request = ConfirmationRequest(
+            action_name="launch_application",
+            description="lancer Bloc-notes",
+        )
+
+        for answer in (
+            "o",
+            "oui",
+            " OUI ",
+        ):
+            with (
+                self.subTest(answer=answer),
+                patch(
+                    "builtins.input",
+                    return_value=answer,
+                ) as user_input,
+            ):
+                result = request_terminal_confirmation(
+                    request
+                )
+
+            self.assertTrue(result)
+            user_input.assert_called_once_with(
+                "Confirmer : lancer Bloc-notes ? [o/N] "
+            )
+
+    def test_terminal_confirmation_rejects_other_answers(
+        self,
+    ) -> None:
+        """Nonaffirmative terminal answers should fail closed."""
+        request = ConfirmationRequest(
+            action_name="launch_application",
+            description="lancer Bloc-notes",
+        )
+
+        for answer in (
+            "",
+            "n",
+            "non",
+            "yes",
+            "y",
+            "ok",
+        ):
+            with (
+                self.subTest(answer=answer),
+                patch(
+                    "builtins.input",
+                    return_value=answer,
+                ),
+            ):
+                result = request_terminal_confirmation(
+                    request
+                )
+
+            self.assertFalse(result)
+
     def test_uses_default_application_assembly(self) -> None:
         """Normal messages should use the assembled assistant."""
         assistant = FakeAssistant(
@@ -98,7 +160,9 @@ class TerminalTests(unittest.TestCase):
         ):
             run_terminal()
 
-        build_assistant.assert_called_once_with()
+        build_assistant.assert_called_once_with(
+            confirmation_handler=request_terminal_confirmation,
+        )
         self.assertEqual(
             assistant.received_messages,
             [

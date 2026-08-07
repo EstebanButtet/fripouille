@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 from assistant_ia.application import (
     ApplicationInitializationError,
@@ -15,7 +17,12 @@ from assistant_ia.core.context import ConversationMessage
 from assistant_ia.intelligence.intent import Intent
 from assistant_ia.intelligence.response import ModelResponse
 from assistant_ia.memory.memory_repository import MemoryRepository
-from assistant_ia.memory.repository import SQLiteDatabase
+from assistant_ia.memory.repository import (
+    DEFAULT_DATABASE_DIRECTORY_NAME,
+    DEFAULT_DATABASE_FILENAME,
+    SQLiteDatabase,
+)
+from assistant_ia.system.windows import WindowsApplicationLauncher
 
 
 class FakeModelClient:
@@ -41,6 +48,23 @@ class FakeModelClient:
         return self._responses.pop(0)
 
 
+
+class RecordingProcessLauncher:
+    """Record process launches without starting real applications."""
+
+    def __init__(self) -> None:
+        """Create an empty process launch history."""
+        self.commands: list[tuple[str, ...]] = []
+
+    def __call__(
+        self,
+        command: tuple[str, ...],
+    ) -> object:
+        """Record one internally resolved process command."""
+        self.commands.append(command)
+        return object()
+
+
 class ApplicationAssemblyTests(unittest.TestCase):
     """Validate complete persistent assistant assembly."""
 
@@ -59,8 +83,8 @@ class ApplicationAssemblyTests(unittest.TestCase):
         """Remove the isolated database directory."""
         self.temporary_directory.cleanup()
 
-    def test_builds_assistant_with_seven_actions(self) -> None:
-        """Application assembly should initialize all safe actions."""
+    def test_builds_assistant_with_eight_actions(self) -> None:
+        """Application assembly should initialize available actions."""
         assistant = build_default_assistant(
             database=self.database,
             model_client=FakeModelClient([]),
@@ -69,11 +93,134 @@ class ApplicationAssemblyTests(unittest.TestCase):
         self.assertTrue(self.database_path.exists())
         self.assertEqual(
             assistant.action_registry.action_count,
-            7,
+            8,
         )
-        self.assertNotIn(
+        self.assertIn(
             "launch_application",
             assistant.action_registry.action_names,
+        )
+
+    def test_builds_assistant_with_default_user_database(
+        self,
+    ) -> None:
+        """Default assembly should use the user-local database path."""
+        local_app_data = (
+            Path(self.temporary_directory.name)
+            / "local-app-data"
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "LOCALAPPDATA": str(local_app_data),
+            },
+            clear=False,
+        ):
+            assistant = build_default_assistant(
+                model_client=FakeModelClient([]),
+            )
+
+        expected_database_path = (
+            local_app_data
+            / DEFAULT_DATABASE_DIRECTORY_NAME
+            / DEFAULT_DATABASE_FILENAME
+        )
+
+        self.assertTrue(
+            expected_database_path.is_file()
+        )
+        self.assertEqual(
+            assistant.action_registry.action_count,
+            8,
+        )
+
+    def test_system_action_fails_closed_without_confirmation(
+        self,
+    ) -> None:
+        """System actions should not execute without confirmation."""
+        process_launcher = RecordingProcessLauncher()
+
+        assistant = build_default_assistant(
+            database=self.database,
+            model_client=FakeModelClient(
+                [
+                    ModelResponse(
+                        content="Fake model success.",
+                        model="fake-model",
+                        intent=Intent(
+                            name="launch_application",
+                            parameters={
+                                "application": "notepad",
+                            },
+                        ),
+                    )
+                ]
+            ),
+            windows_launcher=WindowsApplicationLauncher(
+                process_launcher=process_launcher
+            ),
+        )
+
+        result = assistant.process_message(
+            "Lance le bloc-notes."
+        )
+
+        self.assertEqual(
+            result,
+            "Lancement annulé : Bloc-notes.",
+        )
+        self.assertEqual(
+            process_launcher.commands,
+            [],
+        )
+
+    def test_executes_confirmed_system_action_through_core(
+        self,
+    ) -> None:
+        """Confirmed system actions should use the injected launcher."""
+        process_launcher = RecordingProcessLauncher()
+
+        assistant = build_default_assistant(
+            database=self.database,
+            model_client=FakeModelClient(
+                [
+                    ModelResponse(
+                        content="Fake model success.",
+                        model="fake-model",
+                        intent=Intent(
+                            name="launch_application",
+                            parameters={
+                                "application": "bloc-notes",
+                            },
+                        ),
+                    )
+                ]
+            ),
+            confirmation_handler=lambda request: True,
+            windows_launcher=WindowsApplicationLauncher(
+                process_launcher=process_launcher
+            ),
+        )
+
+        result = assistant.process_message(
+            "Lance le bloc-notes."
+        )
+
+        self.assertEqual(
+            result,
+            "Application lancée : Bloc-notes.",
+        )
+        self.assertEqual(
+            process_launcher.commands,
+            [
+                (
+                    "notepad.exe",
+                ),
+            ],
+        )
+        self.assertNotEqual(
+            result,
+            "Fake model success.",
         )
 
     def test_executes_persistent_action_through_core(self) -> None:

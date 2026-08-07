@@ -120,16 +120,28 @@ class ActionTests(unittest.TestCase):
                 )
             )
 
-    def test_rejects_unsafe_action_name(self) -> None:
-        """Blocked actions should not receive executable definitions."""
-        with self.assertRaisesRegex(
-            ValueError,
-            "Unsupported executable action",
-        ):
-            Action(
+    def test_accepts_launch_application_action(self) -> None:
+        """Application launching may use an explicitly defined action."""
+        action = Action(
+            name="launch_application",
+            handler=lambda parameters: (
+                f"Application : {parameters['application']}."
+            ),
+        )
+
+        result = action.execute(
+            Intent(
                 name="launch_application",
-                handler=lambda parameters: "Résultat.",
+                parameters={
+                    "application": "notepad",
+                },
             )
+        )
+
+        self.assertEqual(
+            result,
+            "Application : notepad.",
+        )
 
     def test_converts_parameter_error_from_handler(self) -> None:
         """Handler parameter errors should become validation errors."""
