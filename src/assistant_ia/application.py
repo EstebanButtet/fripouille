@@ -10,7 +10,12 @@ from assistant_ia.actions.defaults import (
 )
 from assistant_ia.core.assistant import AssistantCore
 from assistant_ia.core.context import ConversationContext
-from assistant_ia.intelligence.model_client import ModelClient
+from assistant_ia.identity.defaults import build_default_identity
+from assistant_ia.identity.models import AssistantIdentity
+from assistant_ia.intelligence.model_client import (
+    ModelClient,
+    OllamaModelClient,
+)
 from assistant_ia.memory.journal_repository import JournalRepository
 from assistant_ia.memory.memory_repository import MemoryRepository
 from assistant_ia.memory.repository import (
@@ -36,6 +41,7 @@ def build_default_assistant(
     permission_policy: PermissionPolicy | None = None,
     confirmation_handler: ConfirmationHandler | None = None,
     windows_launcher: WindowsApplicationLauncher | None = None,
+    identity: AssistantIdentity | None = None,
 ) -> AssistantCore:
     """Build a fully initialized assistant with available actions."""
     if database is not None and not isinstance(
@@ -44,6 +50,20 @@ def build_default_assistant(
     ):
         raise TypeError(
             "Assistant database must be a SQLiteDatabase."
+        )
+
+    if (
+        identity is not None
+        and not isinstance(identity, AssistantIdentity)
+    ):
+        raise TypeError(
+            "Assistant identity must be an AssistantIdentity."
+        )
+
+    if identity is not None and model_client is not None:
+        raise ValueError(
+            "Assistant identity cannot be combined with "
+            "an explicit model client."
         )
 
     if (
@@ -94,8 +114,20 @@ def build_default_assistant(
         windows_launcher=resolved_windows_launcher,
     )
 
+    resolved_model_client = (
+        model_client
+        if model_client is not None
+        else OllamaModelClient(
+            identity=(
+                identity
+                if identity is not None
+                else build_default_identity()
+            )
+        )
+    )
+
     return AssistantCore(
-        model_client=model_client,
+        model_client=resolved_model_client,
         context=context,
         action_registry=action_registry,
     )

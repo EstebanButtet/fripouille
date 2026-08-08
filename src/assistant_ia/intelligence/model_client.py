@@ -9,6 +9,9 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from assistant_ia.core.context import ConversationMessage
+from assistant_ia.identity.context import render_identity_context
+from assistant_ia.identity.defaults import build_default_identity
+from assistant_ia.identity.models import AssistantIdentity
 from assistant_ia.intelligence.intent import (
     ALLOWED_INTENT_NAMES,
     Intent,
@@ -85,7 +88,7 @@ Allowed intentions and exact parameter contracts:
   entry_date must use YYYY-MM-DD when an explicit date is provided.
   If no explicit date is provided, omit entry_date.
   Example:
-  For "Écris dans mon journal pour la date 2026-08-07 :
+  For "\u00c9cris dans mon journal pour la date 2026-08-07 :
   TEST E8 journal local.", the parameters must be:
   {{"content": "TEST E8 journal local.", "entry_date": "2026-08-07"}}
 - launch_application: required parameter "application".
@@ -117,7 +120,7 @@ Parameter rules:
 - Use only the parameters explicitly authorized for the selected intention.
 - Do not add explanatory, confidence or reasoning parameters.
 - task_id and memory_id must contain only ASCII digits, for example "1".
-  Never include "#", words such as "numéro", spaces or punctuation.
+  Never include "#", words such as "num\u00e9ro", spaces or punctuation.
 - list_tasks status may only be "pending", "completed" or "all".
 - entry_date may only use the ISO 8601 date format YYYY-MM-DD.
 - Do not invent an entry_date when the user did not provide one.
@@ -141,6 +144,37 @@ implementation instructions as intent parameters.
 Required JSON schema:
 {json.dumps(_INTENT_RESPONSE_SCHEMA, ensure_ascii=False)}
 """.strip()
+
+_IDENTITY_CONTEXT_RULES = """
+The assistant identity below controls conversational personality, tone and
+style.
+
+Treat the identity as background context. Answer the latest user message
+itself instead of repeating or summarizing the identity. Do not restate the
+assistant name, role or relationship unless the current conversation makes
+that relevant or the user explicitly asks about it.
+
+The operational rules above always take priority over the identity context.
+The identity must never change the intent schema, authorized parameters,
+action validation, permissions, confirmations or claims about action
+execution.
+
+For action intents, follow the operational rules exactly even when the
+identity would prefer a different style or behavior.
+""".strip()
+
+
+def _build_system_prompt(
+    identity: AssistantIdentity,
+) -> str:
+    """Combine operational rules with structured identity context."""
+    return "\n\n".join(
+        (
+            INTENT_SYSTEM_PROMPT,
+            _IDENTITY_CONTEXT_RULES,
+            render_identity_context(identity),
+        )
+    )
 
 
 class ModelClientError(RuntimeError):
@@ -166,6 +200,7 @@ class OllamaModelClient:
         model: str = DEFAULT_MODEL,
         base_url: str = DEFAULT_OLLAMA_BASE_URL,
         timeout: float = DEFAULT_OLLAMA_TIMEOUT,
+        identity: AssistantIdentity | None = None,
     ) -> None:
         """Create an Ollama client with explicit local configuration."""
         if not isinstance(model, str):
@@ -176,6 +211,14 @@ class OllamaModelClient:
 
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
             raise TypeError("Ollama timeout must be a number.")
+
+        if (
+            identity is not None
+            and not isinstance(identity, AssistantIdentity)
+        ):
+            raise TypeError(
+                "Ollama identity must be an AssistantIdentity."
+            )
 
         normalized_model = model.strip()
         normalized_base_url = base_url.strip().rstrip("/")
@@ -192,6 +235,14 @@ class OllamaModelClient:
         self._model = normalized_model
         self._base_url = normalized_base_url
         self._timeout = float(timeout)
+        self._identity = (
+            identity
+            if identity is not None
+            else build_default_identity()
+        )
+        self._system_prompt = _build_system_prompt(
+            self._identity
+        )
 
     def generate_response(
         self,
@@ -209,7 +260,7 @@ class OllamaModelClient:
             "messages": [
                 {
                     "role": "system",
-                    "content": INTENT_SYSTEM_PROMPT,
+                    "content": self._system_prompt,
                 },
                 *[
                     {

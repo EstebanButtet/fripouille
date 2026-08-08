@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from unittest.mock import patch
@@ -14,6 +15,7 @@ from assistant_ia.application import (
     build_default_assistant,
 )
 from assistant_ia.core.context import ConversationMessage
+from assistant_ia.identity.defaults import build_default_identity
 from assistant_ia.intelligence.intent import Intent
 from assistant_ia.intelligence.response import ModelResponse
 from assistant_ia.memory.memory_repository import MemoryRepository
@@ -83,6 +85,82 @@ class ApplicationAssemblyTests(unittest.TestCase):
         """Remove the isolated database directory."""
         self.temporary_directory.cleanup()
 
+    def test_builds_default_ollama_client_with_fripouille(
+        self,
+    ) -> None:
+        """Default assembly should provide Fripouille to Ollama."""
+        fake_client = FakeModelClient([])
+
+        with patch(
+            "assistant_ia.application.OllamaModelClient",
+            return_value=fake_client,
+        ) as ollama_client:
+            build_default_assistant(
+                database=self.database,
+            )
+
+        ollama_client.assert_called_once()
+
+        identity = ollama_client.call_args.kwargs["identity"]
+
+        self.assertEqual(
+            identity,
+            build_default_identity(),
+        )
+        self.assertEqual(
+            identity.name,
+            "Fripouille",
+        )
+
+    def test_injects_custom_identity_into_default_model_client(
+        self,
+    ) -> None:
+        """Application assembly should preserve an injected identity."""
+        identity = replace(
+            build_default_identity(),
+            name="Test identity",
+        )
+        fake_client = FakeModelClient([])
+
+        with patch(
+            "assistant_ia.application.OllamaModelClient",
+            return_value=fake_client,
+        ) as ollama_client:
+            build_default_assistant(
+                database=self.database,
+                identity=identity,
+            )
+
+        self.assertIs(
+            ollama_client.call_args.kwargs["identity"],
+            identity,
+        )
+
+    def test_rejects_identity_with_explicit_model_client(
+        self,
+    ) -> None:
+        """Identity should never be silently ignored by another client."""
+        with self.assertRaisesRegex(
+            ValueError,
+            "cannot be combined with an explicit model client",
+        ):
+            build_default_assistant(
+                database=self.database,
+                model_client=FakeModelClient([]),
+                identity=build_default_identity(),
+            )
+
+    def test_rejects_invalid_identity(self) -> None:
+        """Application assembly should require the identity domain model."""
+        with self.assertRaisesRegex(
+            TypeError,
+            "identity must be an AssistantIdentity",
+        ):
+            build_default_assistant(
+                database=self.database,
+                identity="Fripouille",
+            )
+
     def test_builds_assistant_with_eight_actions(self) -> None:
         """Application assembly should initialize available actions."""
         assistant = build_default_assistant(
@@ -132,6 +210,70 @@ class ApplicationAssemblyTests(unittest.TestCase):
         self.assertEqual(
             assistant.action_registry.action_count,
             8,
+        )
+
+    def test_identity_cannot_override_real_action_result(
+        self,
+    ) -> None:
+        """Personality content must never replace application authority."""
+        identity = replace(
+            build_default_identity(),
+            name="Test Fripouille",
+        )
+        process_launcher = RecordingProcessLauncher()
+        fake_model_client = FakeModelClient(
+            [
+                ModelResponse(
+                    content=(
+                        "Putain, c'est bon, je l'ai lance."
+                    ),
+                    model="fake-model",
+                    intent=Intent(
+                        name="launch_application",
+                        parameters={
+                            "application": "bloc-notes",
+                        },
+                    ),
+                )
+            ]
+        )
+
+        with patch(
+            "assistant_ia.application.OllamaModelClient",
+            return_value=fake_model_client,
+        ) as ollama_client:
+            assistant = build_default_assistant(
+                database=self.database,
+                identity=identity,
+                confirmation_handler=lambda request: True,
+                windows_launcher=WindowsApplicationLauncher(
+                    process_launcher=process_launcher
+                ),
+            )
+
+        result = assistant.process_message(
+            "Lance le bloc-notes."
+        )
+
+        self.assertIs(
+            ollama_client.call_args.kwargs["identity"],
+            identity,
+        )
+        self.assertEqual(
+            result,
+            "Application lanc\u00e9e : Bloc-notes.",
+        )
+        self.assertNotEqual(
+            result,
+            "Putain, c'est bon, je l'ai lance.",
+        )
+        self.assertEqual(
+            process_launcher.commands,
+            [
+                (
+                    "notepad.exe",
+                ),
+            ],
         )
 
     def test_system_action_fails_closed_without_confirmation(
