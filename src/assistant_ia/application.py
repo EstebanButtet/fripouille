@@ -8,6 +8,7 @@ from datetime import date
 from assistant_ia.actions.defaults import (
     build_default_action_registry,
 )
+from assistant_ia.capabilities.context import build_capability_context
 from assistant_ia.core.assistant import AssistantCore
 from assistant_ia.core.context import ConversationContext
 from assistant_ia.identity.defaults import build_default_identity
@@ -24,6 +25,8 @@ from assistant_ia.memory.repository import (
     default_database_path,
 )
 from assistant_ia.memory.task_repository import TaskRepository
+from assistant_ia.people.context import ActivePersonContext
+from assistant_ia.people.defaults import build_default_person
 from assistant_ia.security.confirmation import ConfirmationHandler
 from assistant_ia.security.permissions import PermissionPolicy
 from assistant_ia.system.windows import WindowsApplicationLauncher
@@ -42,6 +45,7 @@ def build_default_assistant(
     confirmation_handler: ConfirmationHandler | None = None,
     windows_launcher: WindowsApplicationLauncher | None = None,
     identity: AssistantIdentity | None = None,
+    person_context: ActivePersonContext | None = None,
 ) -> AssistantCore:
     """Build a fully initialized assistant with available actions."""
     if database is not None and not isinstance(
@@ -64,6 +68,15 @@ def build_default_assistant(
         raise ValueError(
             "Assistant identity cannot be combined with "
             "an explicit model client."
+        )
+
+    if (
+        person_context is not None
+        and not isinstance(person_context, ActivePersonContext)
+    ):
+        raise TypeError(
+            "Assistant person context must be an "
+            "ActivePersonContext."
         )
 
     if (
@@ -114,15 +127,41 @@ def build_default_assistant(
         windows_launcher=resolved_windows_launcher,
     )
 
+    capability_context = build_capability_context(
+        action_registry
+    )
+
+    resolved_identity = (
+        identity
+        if identity is not None
+        else build_default_identity()
+    )
+
+    resolved_person_context = (
+        person_context
+        if person_context is not None
+        else ActivePersonContext(
+            assistant_name=resolved_identity.name,
+            default_person=build_default_person(),
+        )
+    )
+
+    if (
+        resolved_person_context.assistant_name.casefold()
+        != resolved_identity.name.casefold()
+    ):
+        raise ValueError(
+            "Assistant person context name must match "
+            "the assistant identity."
+        )
+
     resolved_model_client = (
         model_client
         if model_client is not None
         else OllamaModelClient(
-            identity=(
-                identity
-                if identity is not None
-                else build_default_identity()
-            )
+            identity=resolved_identity,
+            person_context=resolved_person_context,
+            capability_context=capability_context,
         )
     )
 
@@ -130,4 +169,5 @@ def build_default_assistant(
         model_client=resolved_model_client,
         context=context,
         action_registry=action_registry,
+        person_context=resolved_person_context,
     )

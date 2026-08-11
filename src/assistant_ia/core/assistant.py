@@ -12,6 +12,7 @@ from assistant_ia.actions.registry import (
     ActionRegistry,
 )
 from assistant_ia.core.context import ConversationContext
+from assistant_ia.identity.defaults import build_default_identity
 from assistant_ia.intelligence.intent import Intent
 from assistant_ia.intelligence.model_client import (
     ModelClient,
@@ -19,6 +20,9 @@ from assistant_ia.intelligence.model_client import (
     OllamaModelClient,
 )
 from assistant_ia.intelligence.response import ModelResponse
+from assistant_ia.people.context import ActivePersonContext
+from assistant_ia.people.defaults import build_default_person
+from assistant_ia.people.presentation import detect_presented_person
 
 ACTION_UNAVAILABLE_MESSAGE = (
     "J’ai identifié votre demande, mais aucune action n’a été exécutée. "
@@ -45,6 +49,7 @@ class AssistantCore:
         model_client: ModelClient | None = None,
         context: ConversationContext | None = None,
         action_registry: ActionRegistry | None = None,
+        person_context: ActivePersonContext | None = None,
     ) -> None:
         """Create the assistant core with optional injected dependencies."""
         if (
@@ -55,10 +60,33 @@ class AssistantCore:
                 "Assistant action registry must be an ActionRegistry."
             )
 
+        if (
+            person_context is not None
+            and not isinstance(person_context, ActivePersonContext)
+        ):
+            raise TypeError(
+                "Assistant person context must be an "
+                "ActivePersonContext."
+            )
+
+        default_identity = build_default_identity()
+
+        self._person_context = (
+            person_context
+            if person_context is not None
+            else ActivePersonContext(
+                assistant_name=default_identity.name,
+                default_person=build_default_person(),
+            )
+        )
+
         self._model_client = (
             model_client
             if model_client is not None
-            else OllamaModelClient()
+            else OllamaModelClient(
+                identity=default_identity,
+                person_context=self._person_context,
+            )
         )
         self._context = (
             context
@@ -78,6 +106,11 @@ class AssistantCore:
         return self._context
 
     @property
+    def person_context(self) -> ActivePersonContext:
+        """Return the current conversational person context."""
+        return self._person_context
+
+    @property
     def action_registry(self) -> ActionRegistry:
         """Return the executable action registry used by the assistant."""
         return self._action_registry
@@ -90,6 +123,20 @@ class AssistantCore:
     def process_message(self, user_message: str) -> str:
         """Process one user message and return the assistant response."""
         self._context.add_user_message(user_message)
+
+        presented_person = detect_presented_person(
+            user_message
+        )
+
+        if presented_person is not None:
+            try:
+                self._person_context.set_active_person(
+                    presented_person
+                )
+            except ValueError:
+                # The assistant's reserved name can never become
+                # the active user's identity.
+                pass
 
         try:
             model_response = self._model_client.generate_response(
@@ -120,6 +167,7 @@ class AssistantCore:
     def reset_conversation(self) -> None:
         """Clear the current conversation context and identified intent."""
         self._context.clear()
+        self._person_context.reset()
         self._last_intent = None
 
     def _resolve_assistant_content(
