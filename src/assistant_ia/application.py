@@ -29,6 +29,7 @@ from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import build_default_person
 from assistant_ia.security.confirmation import ConfirmationHandler
 from assistant_ia.security.permissions import PermissionPolicy
+from assistant_ia.runtime import AssistantRuntime, ResponsePresenter
 from assistant_ia.system.windows import WindowsApplicationLauncher
 
 
@@ -171,3 +172,34 @@ def build_default_assistant(
         action_registry=action_registry,
         person_context=resolved_person_context,
     )
+
+def build_default_runtime(
+    database: SQLiteDatabase | None = None,
+    model_client: ModelClient | None = None,
+    context: ConversationContext | None = None,
+    current_date: Callable[[], date] | None = None,
+    permission_policy: PermissionPolicy | None = None,
+    confirmation_handler: ConfirmationHandler | None = None,
+    windows_launcher: WindowsApplicationLauncher | None = None,
+    identity: AssistantIdentity | None = None,
+    person_context: ActivePersonContext | None = None,
+    presenter: ResponsePresenter | None = None,
+) -> AssistantRuntime:
+    """Build the default assistant runtime with optional presentation."""
+    assistant = build_default_assistant(
+        database=database,
+        model_client=model_client,
+        context=context,
+        current_date=current_date,
+        permission_policy=permission_policy,
+        confirmation_handler=confirmation_handler,
+        windows_launcher=windows_launcher,
+        identity=identity,
+        person_context=person_context,
+    )
+
+    return AssistantRuntime(
+        assistant=assistant,
+        presenter=presenter,
+    )
+
