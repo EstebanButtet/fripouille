@@ -32,3 +32,12 @@ dist/
 
 # Configuration locale de VS Code
 .vscode/
+
+# ESP-IDF generated configuration
+
+firmware/fripouille_esp32/sdkconfig
+firmware/fripouille_esp32/sdkconfig.old
+
+# ESP-IDF managed dependencies
+
+firmware/fripouille_esp32/managed_components/
