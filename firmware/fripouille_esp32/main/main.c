@@ -151,6 +151,22 @@ void app_main(void)
 
     message_label = lv_label_create(screen);
 
+    lv_label_set_long_mode(
+        message_label,
+        LV_LABEL_LONG_MODE_WRAP
+    );
+
+    lv_obj_set_width(
+        message_label,
+        420
+    );
+
+    lv_obj_set_style_text_align(
+        message_label,
+        LV_TEXT_ALIGN_CENTER,
+        LV_PART_MAIN
+    );
+
     lv_label_set_text(
         message_label,
         "FRIPOUILLE"
