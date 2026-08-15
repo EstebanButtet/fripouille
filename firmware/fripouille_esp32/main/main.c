@@ -14,6 +14,8 @@
 
 #define SERIAL_LINE_MAX 256
 
+LV_FONT_DECLARE(fripouille_font_20);
+
 static const char *TAG = "fripouille";
 
 static lv_obj_t *message_label = NULL;
@@ -164,6 +166,12 @@ void app_main(void)
     lv_obj_set_style_text_align(
         message_label,
         LV_TEXT_ALIGN_CENTER,
+        LV_PART_MAIN
+    );
+
+    lv_obj_set_style_text_font(
+        message_label,
+        &fripouille_font_20,
         LV_PART_MAIN
     );
 
