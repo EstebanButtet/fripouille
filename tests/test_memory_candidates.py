@@ -172,6 +172,60 @@ class MemoryCandidateAnalyzerTests(unittest.TestCase):
                     self.assertEqual(self.analyzer.analyze(message), ())
         urlopen.assert_not_called()
 
+    def test_explicit_personal_correction_may_reach_analysis(self) -> None:
+        message = (
+            "En fait, je prefere maintenant Fusion 360 pour la CAO."
+        )
+        result, urlopen = self._analyze_with_response(
+            message,
+            [_candidate(message, message)],
+        )
+
+        self.assertEqual(len(result), 1)
+        urlopen.assert_called_once()
+
+    def test_rejects_correction_with_fragmentary_evidence_or_content(
+        self,
+    ) -> None:
+        message = (
+            "En fait, je prefere maintenant Fusion 360 pour la CAO."
+        )
+        invalid_candidates = (
+            _candidate("Fusion 360", "Fusion 360"),
+            _candidate("Fusion 360", message),
+        )
+
+        for candidate_data in invalid_candidates:
+            with self.subTest(candidate_data=candidate_data):
+                result = _parse_candidate_response(
+                    json.dumps({"candidates": [candidate_data]}),
+                    authorized_message=message,
+                )
+                self.assertEqual(result, ())
+
+    def test_accepts_exact_correction_excerpt_with_sufficient_evidence(
+        self,
+    ) -> None:
+        message = (
+            "En fait, je prefere maintenant Fusion 360 pour la CAO."
+        )
+        source_text = "je prefere maintenant Fusion 360 pour la CAO."
+        content = "Je prefere maintenant Fusion 360 pour la CAO."
+
+        result = _parse_candidate_response(
+            json.dumps(
+                {
+                    "candidates": [
+                        _candidate(content, source_text, 1.0)
+                    ]
+                }
+            ),
+            authorized_message=message,
+        )
+
+        self.assertEqual(result[0].content, content)
+        self.assertEqual(result[0].source_text, source_text)
+
     def test_prefilters_obvious_authentication_secrets(self) -> None:
         messages = (
             "Mon mot de passe est Azerty123!",

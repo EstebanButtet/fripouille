@@ -22,6 +22,7 @@ from assistant_ia.intelligence.memory_candidates import (
 )
 from assistant_ia.memory.journal_repository import JournalRepository
 from assistant_ia.memory.memory_repository import MemoryRepository
+from assistant_ia.memory.promotion import MemoryPromotionService
 from assistant_ia.memory.retrieval import ContextualMemoryRetriever
 from assistant_ia.memory.repository import (
     DatabaseError,
@@ -185,6 +186,11 @@ def build_default_assistant(
         person_context=resolved_person_context,
         memory_candidate_analyzer=(
             OllamaMemoryCandidateAnalyzer()
+            if model_client is None
+            else None
+        ),
+        memory_promotion_service=(
+            MemoryPromotionService(memory_repository)
             if model_client is None
             else None
         ),

@@ -22,12 +22,14 @@ ALLOWED_TASK_STATUSES: frozenset[str] = frozenset(
 MemorySource = Literal[
     "legacy_explicit",
     "explicit_user",
+    "conversation_analysis",
 ]
 
 ALLOWED_MEMORY_SOURCES: frozenset[str] = frozenset(
     {
         "legacy_explicit",
         "explicit_user",
+        "conversation_analysis",
     }
 )
 

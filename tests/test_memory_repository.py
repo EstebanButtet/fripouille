@@ -9,7 +9,8 @@ from pathlib import Path
 
 from assistant_ia.memory.errors import MemoryNotFoundError
 from assistant_ia.memory.memory_repository import MemoryRepository
-from assistant_ia.memory.repository import SQLiteDatabase
+from assistant_ia.memory.models import MemoryCandidate
+from assistant_ia.memory.repository import DatabaseError, SQLiteDatabase
 
 
 class SequenceClock:
@@ -98,6 +99,93 @@ class MemoryRepositoryTests(unittest.TestCase):
         self.assertEqual(memory.confidence, 1.0)
         self.assertEqual(memory.created_at, self.first_time)
         self.assertEqual(memory.updated_at, self.first_time)
+
+    def test_saves_confirmed_candidate_with_exact_provenance(self) -> None:
+        repository = self._repository(self.first_time)
+        candidate = MemoryCandidate(
+            content="Mon logiciel prefere est SolidWorks.",
+            source_text="Mon logiciel prefere est SolidWorks.",
+            confidence=0.87,
+        )
+
+        memory = repository.save_candidate(candidate)
+
+        self.assertEqual(memory.id, 1)
+        self.assertEqual(memory.content, candidate.content)
+        self.assertEqual(memory.source, "conversation_analysis")
+        self.assertEqual(memory.source_text, candidate.source_text)
+        self.assertEqual(memory.confidence, candidate.confidence)
+        self.assertEqual(memory.created_at, self.first_time)
+        self.assertEqual(memory.updated_at, self.first_time)
+
+    def test_update_preserves_identity_and_creation_metadata(self) -> None:
+        repository = self._repository(self.first_time, self.second_time)
+        original = repository.save_memory(
+            "Mon logiciel prefere est SolidWorks."
+        )
+        candidate = MemoryCandidate(
+            content="Je prefere maintenant Fusion 360.",
+            source_text="Je prefere maintenant Fusion 360.",
+            confidence=0.91,
+        )
+
+        updated = repository.update_memory(original.id, candidate)
+
+        self.assertEqual(updated.id, original.id)
+        self.assertEqual(updated.created_at, original.created_at)
+        self.assertEqual(updated.updated_at, self.second_time)
+        self.assertGreater(updated.updated_at, original.updated_at)
+        self.assertEqual(updated.content, candidate.content)
+        self.assertEqual(updated.source, "conversation_analysis")
+        self.assertEqual(updated.source_text, candidate.source_text)
+        self.assertEqual(updated.confidence, candidate.confidence)
+
+    def test_update_timestamp_is_strictly_monotonic(self) -> None:
+        repository = self._repository(self.first_time, self.first_time)
+        original = repository.save_memory("Souvenir initial.")
+        candidate = MemoryCandidate(
+            content="Souvenir corrige.",
+            source_text="Souvenir corrige.",
+            confidence=0.9,
+        )
+
+        updated = repository.update_memory(original.id, candidate)
+
+        self.assertGreater(updated.updated_at, original.updated_at)
+
+    def test_update_rolls_back_on_sqlite_failure(self) -> None:
+        repository = self._repository(self.first_time, self.second_time)
+        original = repository.save_memory("Souvenir initial.")
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                CREATE TRIGGER reject_memory_update
+                BEFORE UPDATE ON memories
+                BEGIN
+                    SELECT RAISE(ABORT, 'rejected');
+                END
+                """
+            )
+
+        candidate = MemoryCandidate(
+            content="Souvenir corrige.",
+            source_text="Souvenir corrige.",
+            confidence=0.9,
+        )
+        with self.assertRaises(DatabaseError):
+            repository.update_memory(original.id, candidate)
+
+        self.assertEqual(repository.list_memories(), (original,))
+
+    def test_candidate_operations_reject_invalid_inputs(self) -> None:
+        repository = self._repository()
+        with self.assertRaises(TypeError):
+            repository.save_candidate("not a candidate")
+        with self.assertRaises(ValueError):
+            repository.update_memory(
+                0,
+                MemoryCandidate("fait", "fait", 0.9),
+            )
 
     def test_rejects_empty_content_without_writing(self) -> None:
         """Empty memory content should be rejected before persistence."""

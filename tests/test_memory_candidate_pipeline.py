@@ -159,6 +159,10 @@ class MemoryCandidatePipelineTests(unittest.TestCase):
 
         analyzer_class.assert_called_once_with()
         self.assertEqual(assistant.last_memory_candidates, (candidate,))
+        self.assertEqual(
+            assistant.pending_memory_promotion.candidate,
+            candidate,
+        )
         self.assertEqual(memory_count, 0)
 
 

@@ -68,9 +68,18 @@ tokens, 2FA codes and private keys.
 
 content must be concise, faithful, use only information and words present in the
 current user message, and introduce no inferred fact. source_text must be an
-exact contiguous substring copied verbatim from the current user message.
-confidence measures extraction fidelity and admissibility, never whether the
-statement is true in the world.
+exact contiguous substring copied verbatim from the current user message. For
+an explicit correction, source_text must include the complete correction
+assertion verbatim, including its personal subject and correction marker, and
+content must retain the complete corrected personal assertion, not only its
+new value. confidence measures extraction fidelity and
+admissibility, never whether the statement is true in the world.
+
+Correction example:
+Current user message: En fait, je prefere maintenant Fusion 360 pour la CAO.
+Valid content: Je prefere maintenant Fusion 360 pour la CAO.
+Valid source_text: En fait, je prefere maintenant Fusion 360 pour la CAO.
+Invalid content or source_text: Fusion 360
 
 Do not assign identifiers, persist anything, propose SQL, merge memories,
 resolve contradictions, or use assistant messages as evidence.
@@ -86,13 +95,29 @@ _INADMISSIBLE_PATTERNS = tuple(
         r"\b(?:si|if|maybe)\b",
         r"\bje pense que\b",
         r"\bpeut[ -]?etre\b",
-        r"\b(?:aujourd'hui|ce soir|maintenant|cette fois|temporairement)\b",
         r"\b(?:imagine|fais comme si|roleplay|jeu de role)\b",
         r"\bmon ami\b.*\b(?:dit|prefere|aime)\b",
         r"\b(?:il|elle) (?:dit|prefere|aime)\b",
         r"\bquand je te demande\b",
         r"\b(?:reponds|tu dois) toujours\b",
     )
+)
+
+_TEMPORARY_PATTERN = re.compile(
+    r"\b(?:aujourd'hui|ce soir|maintenant|cette fois|temporairement)\b",
+    flags=re.IGNORECASE,
+)
+_CORRECTION_MARKER_PATTERN = re.compile(
+    r"\b(?:en fait|je corrige|desormais)\b",
+    flags=re.IGNORECASE,
+)
+_CORRECTION_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:en fait|je corrige|desormais|maintenant|plutot)\b",
+    flags=re.IGNORECASE,
+)
+_PERSONAL_EVIDENCE_PATTERN = re.compile(
+    r"\b(?:je|ma|mes|mon)\b",
+    flags=re.IGNORECASE,
 )
 
 _SECRET_PATTERNS = tuple(
@@ -296,9 +321,25 @@ def _validated_candidate(
         return None
     if not source_text.strip() or source_text not in authorized_message:
         return None
+    if _is_explicit_personal_correction(authorized_message):
+        if not _has_explicit_correction_evidence(source_text):
+            return None
+        if not _has_sufficient_correction_coverage(
+            content,
+            authorized_message,
+        ):
+            return None
+        if not _has_sufficient_correction_coverage(
+            source_text,
+            authorized_message,
+        ):
+            return None
     if _contains_secret(content) or _contains_secret(source_text):
         return None
-    if _is_inadmissible_statement(source_text):
+    if (
+        _is_inadmissible_statement(source_text)
+        and not _is_explicit_personal_correction(authorized_message)
+    ):
         return None
     if not _content_is_lexically_grounded(content, authorized_message):
         return None
@@ -329,7 +370,40 @@ def _content_is_lexically_grounded(content: str, message: str) -> bool:
 
 def _is_inadmissible_statement(value: str) -> bool:
     normalized = _normalized_text(value).strip()
-    return any(pattern.search(normalized) for pattern in _INADMISSIBLE_PATTERNS)
+    if any(pattern.search(normalized) for pattern in _INADMISSIBLE_PATTERNS):
+        return True
+    if not _TEMPORARY_PATTERN.search(normalized):
+        return False
+    return not _is_explicit_personal_correction(value)
+
+
+def _is_explicit_personal_correction(value: str) -> bool:
+    normalized = _normalized_text(value)
+    return bool(
+        _CORRECTION_MARKER_PATTERN.search(normalized)
+        and _PERSONAL_EVIDENCE_PATTERN.search(normalized)
+    )
+
+
+def _has_sufficient_correction_coverage(
+    content: str,
+    authorized_message: str,
+) -> bool:
+    content_terms = set(_WORD_PATTERN.findall(_normalized_text(content)))
+    message_terms = set(
+        _WORD_PATTERN.findall(_normalized_text(authorized_message))
+    )
+    if not message_terms:
+        return False
+    return len(content_terms & message_terms) / len(message_terms) >= 0.5
+
+
+def _has_explicit_correction_evidence(value: str) -> bool:
+    normalized = _normalized_text(value)
+    return bool(
+        _CORRECTION_EVIDENCE_PATTERN.search(normalized)
+        and _PERSONAL_EVIDENCE_PATTERN.search(normalized)
+    )
 
 
 def _contains_secret(value: str) -> bool:

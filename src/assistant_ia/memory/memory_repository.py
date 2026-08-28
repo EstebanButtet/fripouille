@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import cast
 
 from assistant_ia.memory.errors import (
     MemoryNotFoundError,
     RepositoryError,
 )
-from assistant_ia.memory.models import Memory, MemorySource
+from assistant_ia.memory.models import (
+    Memory,
+    MemoryCandidate,
+    MemorySource,
+)
 from assistant_ia.memory.repository import SQLiteDatabase
 
 DEFAULT_MEMORY_RESULT_LIMIT = 20
@@ -32,7 +36,7 @@ _MEMORY_SELECT_COLUMNS = """
 
 
 class MemoryRepository:
-    """Save, search and delete memories stored in SQLite."""
+    """Save, search, update and delete memories stored in SQLite."""
 
     def __init__(
         self,
@@ -111,6 +115,136 @@ class MemoryRepository:
             ).fetchone()
 
         return _memory_from_row(memory_row)
+
+    def save_candidate(self, candidate: MemoryCandidate) -> Memory:
+        """Persist one explicitly confirmed conversation candidate."""
+        if not isinstance(candidate, MemoryCandidate):
+            raise TypeError(
+                "Candidate persistence requires a MemoryCandidate."
+            )
+
+        created_at = _normalize_datetime(
+            self._clock(),
+            field_name="Memory creation time",
+        )
+
+        with self._database.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO memories (
+                    content,
+                    source,
+                    source_text,
+                    confidence,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    candidate.content,
+                    "conversation_analysis",
+                    candidate.source_text,
+                    candidate.confidence,
+                    _serialize_datetime(created_at),
+                    _serialize_datetime(created_at),
+                ),
+            )
+            memory_id = cursor.lastrowid
+            if (
+                isinstance(memory_id, bool)
+                or not isinstance(memory_id, int)
+                or memory_id < 1
+            ):
+                raise RepositoryError(
+                    "Created memory identifier is invalid."
+                )
+
+            memory_row = connection.execute(
+                f"""
+                {_MEMORY_SELECT_COLUMNS}
+                WHERE id = ?
+                """,
+                (memory_id,),
+            ).fetchone()
+
+        return _memory_from_row(memory_row)
+
+    def update_memory(
+        self,
+        memory_id: int,
+        candidate: MemoryCandidate,
+    ) -> Memory:
+        """Replace one memory from an explicitly confirmed candidate."""
+        normalized_memory_id = _validate_identifier(memory_id)
+        if not isinstance(candidate, MemoryCandidate):
+            raise TypeError(
+                "Memory update requires a MemoryCandidate."
+            )
+
+        with self._database.connect() as connection:
+            existing_row = connection.execute(
+                f"""
+                {_MEMORY_SELECT_COLUMNS}
+                WHERE id = ?
+                """,
+                (normalized_memory_id,),
+            ).fetchone()
+            if existing_row is None:
+                raise MemoryNotFoundError(
+                    f"Memory {normalized_memory_id} does not exist."
+                )
+
+            existing_memory = _memory_from_row(existing_row)
+            updated_at = _normalize_datetime(
+                self._clock(),
+                field_name="Memory update time",
+            )
+            if updated_at <= existing_memory.updated_at:
+                updated_at = (
+                    existing_memory.updated_at
+                    + timedelta(microseconds=1)
+                )
+
+            update_cursor = connection.execute(
+                """
+                UPDATE memories
+                SET content = ?,
+                    source = ?,
+                    source_text = ?,
+                    confidence = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    candidate.content,
+                    "conversation_analysis",
+                    candidate.source_text,
+                    candidate.confidence,
+                    _serialize_datetime(updated_at),
+                    normalized_memory_id,
+                ),
+            )
+            if update_cursor.rowcount != 1:
+                raise RepositoryError(
+                    "Memory update could not be persisted."
+                )
+
+            updated_row = connection.execute(
+                f"""
+                {_MEMORY_SELECT_COLUMNS}
+                WHERE id = ?
+                """,
+                (normalized_memory_id,),
+            ).fetchone()
+            updated_memory = _memory_from_row(updated_row)
+
+            if updated_memory.created_at != existing_memory.created_at:
+                raise RepositoryError(
+                    "Memory creation time changed during update."
+                )
+
+        return updated_memory
 
     def find_memories(
         self,
