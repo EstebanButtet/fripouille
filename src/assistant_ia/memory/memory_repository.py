@@ -10,7 +10,7 @@ from assistant_ia.memory.errors import (
     MemoryNotFoundError,
     RepositoryError,
 )
-from assistant_ia.memory.models import Memory
+from assistant_ia.memory.models import Memory, MemorySource
 from assistant_ia.memory.repository import SQLiteDatabase
 
 DEFAULT_MEMORY_RESULT_LIMIT = 20
@@ -20,7 +20,11 @@ _MEMORY_SELECT_COLUMNS = """
     SELECT
         id,
         content,
-        created_at
+        source,
+        source_text,
+        confidence,
+        created_at,
+        updated_at
     FROM memories
 """
 
@@ -57,19 +61,31 @@ class MemoryRepository:
             self._clock(),
             field_name="Memory creation time",
         )
+        source: MemorySource = "explicit_user"
+        source_text = None
+        confidence = 1.0
+        updated_at = created_at
 
         with self._database.connect() as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO memories (
                     content,
-                    created_at
+                    source,
+                    source_text,
+                    confidence,
+                    created_at,
+                    updated_at
                 )
-                VALUES (?, ?)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     normalized_content,
+                    source,
+                    source_text,
+                    confidence,
                     _serialize_datetime(created_at),
+                    _serialize_datetime(updated_at),
                 ),
             )
 
@@ -168,20 +184,35 @@ def _memory_from_row(
     memory_row: tuple[object, ...] | None,
 ) -> Memory:
     """Convert one validated SQLite row into a memory model."""
-    if memory_row is None or len(memory_row) != 3:
+    if memory_row is None or len(memory_row) != 7:
         raise RepositoryError(
             "Stored memory data is incomplete."
         )
 
-    memory_id, content, created_at = memory_row
+    (
+        memory_id,
+        content,
+        source,
+        source_text,
+        confidence,
+        created_at,
+        updated_at,
+    ) = memory_row
 
     try:
         return Memory(
             id=cast(int, memory_id),
             content=cast(str, content),
+            source=cast(MemorySource, source),
+            source_text=cast(str | None, source_text),
+            confidence=cast(float, confidence),
             created_at=_parse_datetime(
                 created_at,
                 field_name="Stored memory creation time",
+            ),
+            updated_at=_parse_datetime(
+                updated_at,
+                field_name="Stored memory update time",
             ),
         )
     except (TypeError, ValueError) as error:

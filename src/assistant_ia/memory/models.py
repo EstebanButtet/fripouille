@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+import math
 from typing import Literal, cast
 
 TaskStatus = Literal[
@@ -15,6 +16,18 @@ ALLOWED_TASK_STATUSES: frozenset[str] = frozenset(
     {
         "pending",
         "completed",
+    }
+)
+
+MemorySource = Literal[
+    "legacy_explicit",
+    "explicit_user",
+]
+
+ALLOWED_MEMORY_SOURCES: frozenset[str] = frozenset(
+    {
+        "legacy_explicit",
+        "explicit_user",
     }
 )
 
@@ -93,15 +106,29 @@ class Memory:
 
     id: int
     content: str
+    source: MemorySource
+    source_text: str | None
+    confidence: float
     created_at: datetime
+    updated_at: datetime
 
     def __post_init__(self) -> None:
         """Validate and normalize persisted memory data."""
-        object.__setattr__(
-            self,
-            "id",
-            _validate_identifier(self.id),
+        normalized_created_at = _normalize_datetime(
+            self.created_at,
+            field_name="Memory creation time",
         )
+        normalized_updated_at = _normalize_datetime(
+            self.updated_at,
+            field_name="Memory update time",
+        )
+
+        if normalized_updated_at < normalized_created_at:
+            raise ValueError(
+                "Memory update time cannot precede its creation time."
+            )
+
+        object.__setattr__(self, "id", _validate_identifier(self.id))
         object.__setattr__(
             self,
             "content",
@@ -112,12 +139,21 @@ class Memory:
         )
         object.__setattr__(
             self,
-            "created_at",
-            _normalize_datetime(
-                self.created_at,
-                field_name="Memory creation time",
-            ),
+            "source",
+            _normalize_memory_source(self.source),
         )
+        object.__setattr__(
+            self,
+            "source_text",
+            _validate_optional_source_text(self.source_text),
+        )
+        object.__setattr__(
+            self,
+            "confidence",
+            _normalize_memory_confidence(self.confidence),
+        )
+        object.__setattr__(self, "created_at", normalized_created_at)
+        object.__setattr__(self, "updated_at", normalized_updated_at)
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,6 +251,76 @@ def _normalize_task_status(
         )
 
     return cast(TaskStatus, normalized_status)
+
+
+def _normalize_memory_source(
+    source: MemorySource,
+) -> MemorySource:
+    """Return a validated known memory provenance."""
+    if not isinstance(source, str):
+        raise TypeError(
+            "Memory source must be a string."
+        )
+
+    normalized_source = source.strip()
+
+    if not normalized_source:
+        raise ValueError(
+            "Memory source cannot be empty."
+        )
+
+    if normalized_source not in ALLOWED_MEMORY_SOURCES:
+        raise ValueError(
+            f"Unknown memory source: {normalized_source!r}."
+        )
+
+    return cast(MemorySource, normalized_source)
+
+
+def _validate_optional_source_text(
+    source_text: str | None,
+) -> str | None:
+    """Validate optional exact user evidence without rewriting it."""
+    if source_text is None:
+        return None
+
+    if not isinstance(source_text, str):
+        raise TypeError(
+            "Memory source text must be a string or None."
+        )
+
+    if not source_text.strip():
+        raise ValueError(
+            "Memory source text cannot be empty."
+        )
+
+    return source_text
+
+
+def _normalize_memory_confidence(
+    confidence: float,
+) -> float:
+    """Return confidence in the validated recording mechanism."""
+    if isinstance(confidence, bool) or not isinstance(
+        confidence,
+        (int, float),
+    ):
+        raise TypeError(
+            "Memory confidence must be a number."
+        )
+
+    normalized_confidence = float(confidence)
+
+    if (
+        not math.isfinite(normalized_confidence)
+        or normalized_confidence < 0.0
+        or normalized_confidence > 1.0
+    ):
+        raise ValueError(
+            "Memory confidence must be between 0.0 and 1.0."
+        )
+
+    return normalized_confidence
 
 
 def _normalize_datetime(

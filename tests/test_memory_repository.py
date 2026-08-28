@@ -93,7 +93,11 @@ class MemoryRepositoryTests(unittest.TestCase):
             memory.content,
             "Mon examen est le 24 août.",
         )
+        self.assertEqual(memory.source, "explicit_user")
+        self.assertIsNone(memory.source_text)
+        self.assertEqual(memory.confidence, 1.0)
         self.assertEqual(memory.created_at, self.first_time)
+        self.assertEqual(memory.updated_at, self.first_time)
 
     def test_rejects_empty_content_without_writing(self) -> None:
         """Empty memory content should be rejected before persistence."""

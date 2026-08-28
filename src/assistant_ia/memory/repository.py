@@ -13,7 +13,7 @@ DEFAULT_DATABASE_DIRECTORY_NAME = "assistant-ia"
 DEFAULT_DATABASE_FILENAME = "assistant_ia.db"
 
 _INITIAL_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 _SCHEMA_VERSION_COLUMNS = (
     ("id", "INTEGER", 0, 1),
@@ -32,7 +32,11 @@ _BUSINESS_TABLE_COLUMNS = {
     "memories": (
         ("id", "INTEGER", 0, 1),
         ("content", "TEXT", 1, 0),
+        ("source", "TEXT", 1, 0),
+        ("source_text", "TEXT", 0, 0),
+        ("confidence", "REAL", 1, 0),
         ("created_at", "TEXT", 1, 0),
+        ("updated_at", "TEXT", 1, 0),
     ),
     "journal_entries": (
         ("id", "INTEGER", 0, 1),
@@ -277,6 +281,86 @@ def _migrate_schema_1_to_2(
     )
 
 
+def _migrate_schema_2_to_3(
+    connection: sqlite3.Connection,
+) -> None:
+    """Add inspectable provenance to every persistent memory."""
+    source_count_row = connection.execute(
+        "SELECT COUNT(*) FROM memories"
+    ).fetchone()
+
+    if source_count_row is None:
+        raise DatabaseError(
+            "Existing memories could not be counted."
+        )
+
+    source_count = source_count_row[0]
+
+    connection.execute(
+        "ALTER TABLE memories RENAME TO memories_v2"
+    )
+    connection.execute(
+        """
+        CREATE TABLE memories (
+            id INTEGER PRIMARY KEY,
+            content TEXT NOT NULL
+                CHECK (length(trim(content)) > 0),
+            source TEXT NOT NULL
+                CHECK (length(trim(source)) > 0),
+            source_text TEXT
+                CHECK (
+                    source_text IS NULL
+                    OR length(trim(source_text)) > 0
+                ),
+            confidence REAL NOT NULL
+                CHECK (confidence >= 0.0 AND confidence <= 1.0),
+            created_at TEXT NOT NULL
+                CHECK (length(trim(created_at)) > 0),
+            updated_at TEXT NOT NULL
+                CHECK (length(trim(updated_at)) > 0)
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO memories (
+            id,
+            content,
+            source,
+            source_text,
+            confidence,
+            created_at,
+            updated_at
+        )
+        SELECT
+            id,
+            content,
+            'legacy_explicit',
+            NULL,
+            1.0,
+            created_at,
+            created_at
+        FROM memories_v2
+        """
+    )
+
+    target_count_row = connection.execute(
+        "SELECT COUNT(*) FROM memories"
+    ).fetchone()
+
+    if (
+        target_count_row is None
+        or target_count_row[0] != source_count
+    ):
+        raise DatabaseError(
+            "Existing memories were not fully preserved."
+        )
+
+    connection.execute(
+        "DROP TABLE memories_v2"
+    )
+
+
 def _validate_current_business_schema(
     connection: sqlite3.Connection,
 ) -> None:
@@ -324,6 +408,7 @@ def _table_columns(
 
 _SCHEMA_MIGRATIONS = {
     1: _migrate_schema_1_to_2,
+    2: _migrate_schema_2_to_3,
 }
 
 

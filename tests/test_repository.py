@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from assistant_ia.memory import repository as repository_module
 from assistant_ia.memory.repository import (
     CURRENT_SCHEMA_VERSION,
     DEFAULT_DATABASE_DIRECTORY_NAME,
@@ -315,6 +316,72 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 (1, 1),
             )
 
+    def _create_version_two_schema(
+        self,
+        memories: tuple[tuple[int, str, str], ...] = (),
+    ) -> None:
+        """Create the exact schema used before memory provenance."""
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE schema_version (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    version INTEGER NOT NULL CHECK (version >= 1)
+                )
+                """
+            )
+            connection.execute(
+                """
+                INSERT INTO schema_version (id, version)
+                VALUES (?, ?)
+                """,
+                (1, 2),
+            )
+            connection.execute(
+                """
+                CREATE TABLE tasks (
+                    id INTEGER PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    due_at TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    completed_at TEXT
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE memories (
+                    id INTEGER PRIMARY KEY,
+                    content TEXT NOT NULL
+                        CHECK (length(trim(content)) > 0),
+                    created_at TEXT NOT NULL
+                        CHECK (length(trim(created_at)) > 0)
+                )
+                """
+            )
+            connection.execute(
+                """
+                CREATE TABLE journal_entries (
+                    id INTEGER PRIMARY KEY,
+                    content TEXT NOT NULL,
+                    entry_date TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            connection.executemany(
+                """
+                INSERT INTO memories (
+                    id,
+                    content,
+                    created_at
+                )
+                VALUES (?, ?, ?)
+                """,
+                memories,
+            )
+
     def _table_names(self) -> list[tuple[str]]:
         """Return all non-internal table names in deterministic order."""
         with self.database.connect() as connection:
@@ -384,6 +451,174 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
         self.assertTrue(self._table_exists("tasks"))
         self.assertTrue(self._table_exists("memories"))
         self.assertTrue(self._table_exists("journal_entries"))
+
+    def test_migrates_empty_version_two_database(self) -> None:
+        """An empty v2 memory table should become the v3 schema."""
+        self._create_version_two_schema()
+
+        self.database.initialize()
+
+        with self.database.connect() as connection:
+            version = connection.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            columns = connection.execute(
+                """
+                SELECT name
+                FROM pragma_table_info('memories')
+                ORDER BY cid
+                """
+            ).fetchall()
+            count = connection.execute(
+                "SELECT COUNT(*) FROM memories"
+            ).fetchone()
+
+        self.assertEqual(version, (3,))
+        self.assertEqual(
+            columns,
+            [
+                ("id",),
+                ("content",),
+                ("source",),
+                ("source_text",),
+                ("confidence",),
+                ("created_at",),
+                ("updated_at",),
+            ],
+        )
+        self.assertEqual(count, (0,))
+
+    def test_migrates_version_two_memories_without_inventing_evidence(
+        self,
+    ) -> None:
+        """V2 rows should preserve data and receive honest provenance."""
+        memories = (
+            (
+                4,
+                "  Premier contenu exact.  ",
+                "2026-08-07T01:00:00+00:00",
+            ),
+            (
+                9,
+                "Deuxième contenu exact.",
+                "2026-08-08T02:30:00+00:00",
+            ),
+        )
+        self._create_version_two_schema(memories)
+
+        self.database.initialize()
+
+        with self.database.connect() as connection:
+            migrated_rows = connection.execute(
+                """
+                SELECT
+                    id,
+                    content,
+                    source,
+                    source_text,
+                    confidence,
+                    created_at,
+                    updated_at
+                FROM memories
+                ORDER BY id
+                """
+            ).fetchall()
+
+        self.assertEqual(
+            migrated_rows,
+            [
+                (
+                    4,
+                    "  Premier contenu exact.  ",
+                    "legacy_explicit",
+                    None,
+                    1.0,
+                    "2026-08-07T01:00:00+00:00",
+                    "2026-08-07T01:00:00+00:00",
+                ),
+                (
+                    9,
+                    "Deuxième contenu exact.",
+                    "legacy_explicit",
+                    None,
+                    1.0,
+                    "2026-08-08T02:30:00+00:00",
+                    "2026-08-08T02:30:00+00:00",
+                ),
+            ],
+        )
+
+    def test_version_two_migration_rolls_back_completely(
+        self,
+    ) -> None:
+        """A v3 migration failure should restore version and v2 rows."""
+        original_row = (
+            7,
+            "Souvenir préservé.",
+            "2026-08-07T01:00:00+00:00",
+        )
+        self._create_version_two_schema((original_row,))
+        migrate_to_v3 = repository_module._SCHEMA_MIGRATIONS[2]
+
+        def failing_migration(
+            connection: sqlite3.Connection,
+        ) -> None:
+            migrate_to_v3(connection)
+            connection.execute(
+                "SELECT * FROM table_that_does_not_exist"
+            )
+
+        with (
+            patch.dict(
+                repository_module._SCHEMA_MIGRATIONS,
+                {
+                    2: failing_migration,
+                },
+            ),
+            self.assertRaisesRegex(
+                DatabaseError,
+                "SQLite database operation failed",
+            ),
+        ):
+            self.database.initialize()
+
+        with self.database.connect() as connection:
+            version = connection.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            columns = connection.execute(
+                """
+                SELECT name
+                FROM pragma_table_info('memories')
+                ORDER BY cid
+                """
+            ).fetchall()
+            rows = connection.execute(
+                """
+                SELECT id, content, created_at
+                FROM memories
+                """
+            ).fetchall()
+            migrated_table = connection.execute(
+                """
+                SELECT COUNT(*)
+                FROM sqlite_master
+                WHERE type = 'table'
+                  AND name = 'memories_v2'
+                """
+            ).fetchone()
+
+        self.assertEqual(version, (2,))
+        self.assertEqual(
+            columns,
+            [
+                ("id",),
+                ("content",),
+                ("created_at",),
+            ],
+        )
+        self.assertEqual(rows, [original_row])
+        self.assertEqual(migrated_table, (0,))
 
     def test_migration_updates_schema_version(self) -> None:
         """A successful migration should update its metadata version."""

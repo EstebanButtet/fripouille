@@ -209,18 +209,62 @@ class TaskTests(unittest.TestCase):
 class MemoryTests(unittest.TestCase):
     """Validate persistent memory model behavior."""
 
+    def setUp(self) -> None:
+        """Create deterministic timestamps for memory tests."""
+        self.created_at = datetime(
+            2026,
+            8,
+            7,
+            2,
+            0,
+            tzinfo=timezone.utc,
+        )
+        self.updated_at = datetime(
+            2026,
+            8,
+            7,
+            3,
+            0,
+            tzinfo=timezone.utc,
+        )
+
+    def _memory(self, **overrides: object) -> Memory:
+        """Build one memory while allowing focused invalid values."""
+        values = {
+            "id": 2,
+            "content": "Mon examen est le 24 août.",
+            "source": "explicit_user",
+            "source_text": None,
+            "confidence": 1.0,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
+        values.update(overrides)
+
+        return Memory(**values)  # type: ignore[arg-type]
+
     def test_normalizes_valid_memory(self) -> None:
-        """A valid memory should normalize content and time."""
+        """A valid v3 memory should normalize its stored fields."""
         local_timezone = timezone(timedelta(hours=2))
 
-        memory = Memory(
-            id=2,
+        memory = self._memory(
             content=" Mon examen est le 24 août. ",
+            source=" explicit_user ",
+            source_text="  Je passe mon examen le 24 août.  ",
+            confidence=0.75,
             created_at=datetime(
                 2026,
                 8,
                 7,
                 4,
+                0,
+                tzinfo=local_timezone,
+            ),
+            updated_at=datetime(
+                2026,
+                8,
+                7,
+                5,
                 0,
                 tzinfo=local_timezone,
             ),
@@ -231,6 +275,12 @@ class MemoryTests(unittest.TestCase):
             memory.content,
             "Mon examen est le 24 août.",
         )
+        self.assertEqual(memory.source, "explicit_user")
+        self.assertEqual(
+            memory.source_text,
+            "  Je passe mon examen le 24 août.  ",
+        )
+        self.assertEqual(memory.confidence, 0.75)
         self.assertEqual(
             memory.created_at,
             datetime(
@@ -242,6 +292,17 @@ class MemoryTests(unittest.TestCase):
                 tzinfo=timezone.utc,
             ),
         )
+        self.assertEqual(
+            memory.updated_at,
+            datetime(
+                2026,
+                8,
+                7,
+                3,
+                0,
+                tzinfo=timezone.utc,
+            ),
+        )
 
     def test_rejects_empty_memory_content(self) -> None:
         """Memories should contain meaningful text."""
@@ -249,11 +310,93 @@ class MemoryTests(unittest.TestCase):
             ValueError,
             "Memory content cannot be empty",
         ):
-            Memory(
-                id=1,
+            self._memory(
                 content=" ",
-                created_at=datetime.now(timezone.utc),
             )
+
+    def test_rejects_empty_or_unknown_source(self) -> None:
+        """Memory provenance must be one of the known mechanisms."""
+        with self.assertRaisesRegex(
+            ValueError,
+            "Memory source cannot be empty",
+        ):
+            self._memory(source=" ")
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "Unknown memory source",
+        ):
+            self._memory(source="invented")
+
+    def test_accepts_null_source_text(self) -> None:
+        """Exact source evidence may be unavailable."""
+        memory = self._memory(source_text=None)
+
+        self.assertIsNone(memory.source_text)
+
+    def test_accepts_non_empty_exact_source_text(self) -> None:
+        """Available user evidence should be preserved exactly."""
+        memory = self._memory(
+            source_text="  Texte utilisateur exact.  "
+        )
+
+        self.assertEqual(
+            memory.source_text,
+            "  Texte utilisateur exact.  ",
+        )
+
+    def test_rejects_empty_source_text(self) -> None:
+        """Present source evidence cannot be blank."""
+        with self.assertRaisesRegex(
+            ValueError,
+            "Memory source text cannot be empty",
+        ):
+            self._memory(source_text="   ")
+
+    def test_accepts_confidence_boundaries(self) -> None:
+        """Both inclusive confidence boundaries should be valid."""
+        for confidence in (0.0, 1.0):
+            with self.subTest(confidence=confidence):
+                memory = self._memory(
+                    confidence=confidence
+                )
+
+                self.assertEqual(
+                    memory.confidence,
+                    confidence,
+                )
+
+    def test_rejects_confidence_outside_boundaries(self) -> None:
+        """Confidence must remain within its inclusive interval."""
+        for confidence in (-0.01, 1.01):
+            with (
+                self.subTest(confidence=confidence),
+                self.assertRaisesRegex(
+                    ValueError,
+                    "between 0.0 and 1.0",
+                ),
+            ):
+                self._memory(
+                    confidence=confidence
+                )
+
+    def test_rejects_update_before_creation(self) -> None:
+        """A memory cannot be updated before it was created."""
+        with self.assertRaisesRegex(
+            ValueError,
+            "cannot precede",
+        ):
+            self._memory(
+                created_at=self.updated_at,
+                updated_at=self.created_at,
+            )
+
+    def test_is_immutable(self) -> None:
+        """Persistent memory metadata should remain immutable."""
+        memory = self._memory()
+
+        with self.assertRaises(FrozenInstanceError):
+            memory.content = "Autre contenu."
 
 
 class JournalEntryTests(unittest.TestCase):
