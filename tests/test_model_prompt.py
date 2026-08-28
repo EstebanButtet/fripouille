@@ -264,6 +264,15 @@ class IntentSystemPromptTests(unittest.TestCase):
             "conversation, not launch_application.",
             INTENT_SYSTEM_PROMPT,
         )
+        self.assertIn(
+            "A question asking which application or tool the user "
+            "should open is an",
+            INTENT_SYSTEM_PROMPT,
+        )
+        self.assertIn(
+            "information request, not an execution request",
+            INTENT_SYSTEM_PROMPT,
+        )
 
     def test_ambiguous_launch_reference_must_not_be_invented(
         self,

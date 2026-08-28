@@ -19,6 +19,7 @@ from assistant_ia.intelligence.model_client import (
 )
 from assistant_ia.memory.journal_repository import JournalRepository
 from assistant_ia.memory.memory_repository import MemoryRepository
+from assistant_ia.memory.retrieval import ContextualMemoryRetriever
 from assistant_ia.memory.repository import (
     DatabaseError,
     SQLiteDatabase,
@@ -112,13 +113,15 @@ def build_default_assistant(
         else WindowsApplicationLauncher()
     )
 
+    memory_repository = MemoryRepository(
+        resolved_database
+    )
+
     action_registry = build_default_action_registry(
         task_repository=TaskRepository(
             resolved_database
         ),
-        memory_repository=MemoryRepository(
-            resolved_database
-        ),
+        memory_repository=memory_repository,
         journal_repository=JournalRepository(
             resolved_database
         ),
@@ -129,7 +132,8 @@ def build_default_assistant(
     )
 
     capability_context = build_capability_context(
-        action_registry
+        action_registry,
+        automatic_memory_retrieval=model_client is None,
     )
 
     resolved_identity = (
@@ -163,6 +167,11 @@ def build_default_assistant(
             identity=resolved_identity,
             person_context=resolved_person_context,
             capability_context=capability_context,
+            contextual_memory_retriever=(
+                ContextualMemoryRetriever(
+                    memory_repository
+                )
+            ),
         )
     )
 
@@ -172,6 +181,7 @@ def build_default_assistant(
         action_registry=action_registry,
         person_context=resolved_person_context,
     )
+
 
 def build_default_runtime(
     database: SQLiteDatabase | None = None,
@@ -202,4 +212,3 @@ def build_default_runtime(
         assistant=assistant,
         presenter=presenter,
     )
-

@@ -45,6 +45,14 @@ from assistant_ia.intelligence.turn import (
     ConversationTurn,
     build_conversation_turn,
 )
+from assistant_ia.memory.errors import RepositoryError
+from assistant_ia.memory.repository import DatabaseError
+from assistant_ia.memory.retrieval import (
+    MAX_INJECTED_CONTEXTUAL_MEMORIES,
+    ContextualMemoryRetriever,
+    RetrievedMemory,
+    bound_contextual_memories,
+)
 from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import build_default_person
 
@@ -88,6 +96,9 @@ class OllamaModelClient:
         identity: AssistantIdentity | None = None,
         person_context: ActivePersonContext | None = None,
         capability_context: CapabilityContext | None = None,
+        contextual_memory_retriever: (
+            ContextualMemoryRetriever | None
+        ) = None,
     ) -> None:
         """Create an Ollama client with explicit local configuration."""
         if not isinstance(model, str):
@@ -134,6 +145,18 @@ class OllamaModelClient:
                 "CapabilityContext."
             )
 
+        if (
+            contextual_memory_retriever is not None
+            and not isinstance(
+                contextual_memory_retriever,
+                ContextualMemoryRetriever,
+            )
+        ):
+            raise TypeError(
+                "Ollama contextual memory retriever must be a "
+                "ContextualMemoryRetriever."
+            )
+
         normalized_model = model.strip()
         normalized_base_url = base_url.strip().rstrip("/")
 
@@ -173,8 +196,23 @@ class OllamaModelClient:
             if capability_context is not None
             else CapabilityContext(
                 available_actions=(),
+                automatic_memory_retrieval=(
+                    contextual_memory_retriever is not None
+                ),
             )
         )
+        self._contextual_memory_retriever = (
+            contextual_memory_retriever
+        )
+
+        if (
+            self._capability_context.automatic_memory_retrieval
+            != (self._contextual_memory_retriever is not None)
+        ):
+            raise ValueError(
+                "Ollama automatic memory capability must match "
+                "its contextual memory retriever."
+            )
 
         if (
             self._person_context.assistant_name.casefold()
@@ -239,9 +277,16 @@ class OllamaModelClient:
                 intent=intent,
             )
 
+        contextual_memories = (
+            self._retrieve_contextual_memories(
+                turn.current_user_message.content
+            )
+        )
+
         conversation_content, conversation_model = (
             self._generate_conversation(
-                turn
+                turn,
+                contextual_memories=contextual_memories,
             )
         )
 
@@ -457,6 +502,8 @@ class OllamaModelClient:
     def _generate_conversation(
         self,
         turn: ConversationTurn,
+        *,
+        contextual_memories: tuple[RetrievedMemory, ...] = (),
     ) -> tuple[str, str]:
         """Generate only the natural conversational response."""
         payload = {
@@ -466,6 +513,11 @@ class OllamaModelClient:
                     self._identity,
                     self._person_context,
                     self._capability_context,
+                    contextual_memories=(
+                        bound_contextual_memories(
+                            contextual_memories
+                        )
+                    ),
                 ),
                 turn=turn,
             ),
@@ -490,6 +542,28 @@ class OllamaModelClient:
             )
 
         return normalized_content, model
+
+    def _retrieve_contextual_memories(
+        self,
+        user_message: str,
+    ) -> tuple[RetrievedMemory, ...]:
+        """Recall conversational context, failing soft on storage errors."""
+        if self._contextual_memory_retriever is None:
+            return ()
+
+        try:
+            retrieved_memories = (
+                self._contextual_memory_retriever.retrieve(
+                    user_message,
+                    limit=MAX_INJECTED_CONTEXTUAL_MEMORIES,
+                )
+            )
+        except (DatabaseError, RepositoryError):
+            return ()
+
+        return bound_contextual_memories(
+            retrieved_memories
+        )
 
     @staticmethod
     def _build_turn_messages(

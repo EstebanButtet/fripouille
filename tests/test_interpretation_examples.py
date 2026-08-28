@@ -35,6 +35,11 @@ class InterpretationExamplesTests(unittest.TestCase):
             '"launch_application"',
             prompt,
         )
+        self.assertIn(
+            "Pour cette discussion, je veux utiliser Fusion 360. "
+            "Que dois-je ouvrir ?",
+            prompt,
+        )
 
     def test_prompt_distinguishes_memory_request_from_capability_question(
         self,

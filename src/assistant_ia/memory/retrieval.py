@@ -15,6 +15,9 @@ from assistant_ia.memory.models import Memory
 DEFAULT_CONTEXTUAL_MEMORY_LIMIT = 3
 MAX_CONTEXTUAL_MEMORY_LIMIT = 20
 DEFAULT_RETRIEVAL_CANDIDATE_LIMIT = 500
+MAX_INJECTED_CONTEXTUAL_MEMORIES = 5
+MAX_INJECTED_MEMORY_CONTENT_CHARACTERS = 500
+MAX_INJECTED_MEMORY_TOTAL_CHARACTERS = 1500
 
 MIN_TOKEN_LENGTH = 2
 
@@ -187,6 +190,44 @@ class ContextualMemoryRetriever:
         )
 
         return tuple(matches[:normalized_limit])
+
+
+def bound_contextual_memories(
+    memories: tuple[RetrievedMemory, ...],
+) -> tuple[RetrievedMemory, ...]:
+    """Select whole ranked memories within strict prompt budgets."""
+    if not isinstance(memories, tuple):
+        raise TypeError(
+            "Retrieved memories must be provided as a tuple."
+        )
+
+    selected: list[RetrievedMemory] = []
+    total_content_characters = 0
+
+    for retrieved_memory in memories:
+        if not isinstance(retrieved_memory, RetrievedMemory):
+            raise TypeError(
+                "Contextual memory entries must be RetrievedMemory objects."
+            )
+
+        content_length = len(retrieved_memory.memory.content)
+
+        if content_length > MAX_INJECTED_MEMORY_CONTENT_CHARACTERS:
+            continue
+
+        if (
+            total_content_characters + content_length
+            > MAX_INJECTED_MEMORY_TOTAL_CHARACTERS
+        ):
+            continue
+
+        selected.append(retrieved_memory)
+        total_content_characters += content_length
+
+        if len(selected) == MAX_INJECTED_CONTEXTUAL_MEMORIES:
+            break
+
+    return tuple(selected)
 
 
 def _useful_terms(value: str) -> frozenset[str]:

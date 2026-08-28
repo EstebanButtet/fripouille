@@ -118,6 +118,8 @@ class CapabilityContext:
 
 def build_capability_context(
     action_registry: ActionRegistry,
+    *,
+    automatic_memory_retrieval: bool = False,
 ) -> CapabilityContext:
     """Build capabilities from the real executable action registry."""
     if not isinstance(action_registry, ActionRegistry):
@@ -125,10 +127,16 @@ def build_capability_context(
             "Capability context requires an ActionRegistry."
         )
 
+    if not isinstance(automatic_memory_retrieval, bool):
+        raise TypeError(
+            "Automatic memory retrieval flag must be a boolean."
+        )
+
     return CapabilityContext(
         available_actions=tuple(
             action_registry.action_names
         ),
+        automatic_memory_retrieval=automatic_memory_retrieval,
     )
 
 
@@ -216,12 +224,21 @@ def render_capability_context(
         )
     )
 
-    persistent_memory_statement = (
-        "Persistent memories are available only through "
-        "explicit registered memory actions."
-        if has_persistent_memory_actions
-        else "No registered persistent memory action is currently available."
-    )
+    if context.automatic_memory_retrieval:
+        persistent_memory_statement = (
+            "Persistent memories can provide automatic contextual data "
+            "for natural conversation. Explicit registered memory actions "
+            "remain separate."
+        )
+    elif has_persistent_memory_actions:
+        persistent_memory_statement = (
+            "Persistent memories are available only through "
+            "explicit registered memory actions."
+        )
+    else:
+        persistent_memory_statement = (
+            "No registered persistent memory action is currently available."
+        )
     automatic_memory_statement = (
         "Automatic contextual memory retrieval is available."
         if context.automatic_memory_retrieval

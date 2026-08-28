@@ -85,6 +85,25 @@ class CapabilityContextTests(unittest.TestCase):
             context.robot_control
         )
 
+    def test_builder_enables_only_explicit_automatic_retrieval(
+        self,
+    ) -> None:
+        """Assembly must opt in when a working retriever is present."""
+        registry = ActionRegistry()
+
+        default_context = build_capability_context(registry)
+        retrieval_context = build_capability_context(
+            registry,
+            automatic_memory_retrieval=True,
+        )
+
+        self.assertFalse(
+            default_context.automatic_memory_retrieval
+        )
+        self.assertTrue(
+            retrieval_context.automatic_memory_retrieval
+        )
+
     def test_render_lists_only_real_actions(
         self,
     ) -> None:
@@ -413,6 +432,14 @@ class CapabilityContextTests(unittest.TestCase):
         )
         self.assertNotIn(
             "Automatic contextual memory retrieval is not available.",
+            rendered,
+        )
+        self.assertIn(
+            "Persistent memories can provide automatic contextual data",
+            rendered,
+        )
+        self.assertNotIn(
+            "Persistent memories are available only through",
             rendered,
         )
 

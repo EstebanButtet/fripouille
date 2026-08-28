@@ -1,7 +1,10 @@
 """Tests for the complete fixed-total conversational pipeline."""
 
 import json
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from assistant_ia.core.context import ConversationMessage
 from assistant_ia.intelligence.allocation import (
@@ -11,6 +14,9 @@ from assistant_ia.intelligence.model_client import OllamaModelClient
 from assistant_ia.intelligence.prompt import (
     INTERPRETATION_RESPONSE_SCHEMA,
 )
+from assistant_ia.memory.memory_repository import MemoryRepository
+from assistant_ia.memory.repository import SQLiteDatabase
+from assistant_ia.memory.retrieval import ContextualMemoryRetriever
 
 
 class PipelineClient(OllamaModelClient):
@@ -22,8 +28,13 @@ class PipelineClient(OllamaModelClient):
         interpretation: dict[str, object],
         allocation: dict[str, object] | None = None,
         conversation: str = "R?ponse conversationnelle.",
+        contextual_memory_retriever: (
+            ContextualMemoryRetriever | None
+        ) = None,
     ) -> None:
-        super().__init__()
+        super().__init__(
+            contextual_memory_retriever=contextual_memory_retriever,
+        )
 
         self.interpretation = interpretation
         self.allocation = allocation
@@ -151,6 +162,64 @@ class FixedTotalConversationPipelineTests(unittest.TestCase):
         self.assertIn(
             "Total : 180 minutes",
             response.content,
+        )
+
+    def test_fixed_total_never_calls_contextual_retriever(self) -> None:
+        """Certified allocation must remain isolated from memory data."""
+        with tempfile.TemporaryDirectory() as directory:
+            database = SQLiteDatabase(
+                Path(directory) / "assistant.db"
+            )
+            database.initialize()
+            retriever = ContextualMemoryRetriever(
+                MemoryRepository(database)
+            )
+            client = PipelineClient(
+                interpretation={
+                    "name": "conversation",
+                    "parameters": {},
+                    "conversation": {
+                        "mode": "fixed_total_allocation",
+                        "target_text": "trois heures",
+                    },
+                },
+                allocation={
+                    "parts": [
+                        {
+                            "label": "Travail",
+                            "amount": 180,
+                        }
+                    ],
+                },
+                contextual_memory_retriever=retriever,
+            )
+
+            with patch.object(
+                retriever,
+                "retrieve",
+                wraps=retriever.retrieve,
+            ) as retrieve:
+                client.generate_response(
+                    (
+                        ConversationMessage(
+                            role="user",
+                            content=(
+                                "J'ai exactement trois heures. "
+                                "Répartis-les."
+                            ),
+                        ),
+                    )
+                )
+
+        retrieve.assert_not_called()
+        self.assertEqual(len(client.payloads), 2)
+        self.assertNotIn(
+            "Contextual memory data:",
+            client.payloads[0]["messages"][0]["content"],
+        )
+        self.assertNotIn(
+            "Contextual memory data:",
+            client.payloads[1]["messages"][0]["content"],
         )
 
     def test_standard_conversation_still_uses_natural_generation(
