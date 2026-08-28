@@ -20,8 +20,8 @@ from assistant_ia.interfaces.terminal import (
 )
 
 
-class FakeAssistant:
-    """Provide deterministic terminal assistant responses."""
+class FakeRuntime:
+    """Provide deterministic terminal runtime responses."""
 
     def __init__(
         self,
@@ -55,8 +55,8 @@ class FakeAssistant:
         self.reset_count += 1
 
 
-class FailingAssistant:
-    """Simulate a core processing failure."""
+class FailingRuntime:
+    """Simulate a core processing failure through the runtime boundary."""
 
     def process_message(
         self,
@@ -134,9 +134,9 @@ class TerminalTests(unittest.TestCase):
 
             self.assertFalse(result)
 
-    def test_uses_default_application_assembly(self) -> None:
-        """Normal messages should use the assembled assistant."""
-        assistant = FakeAssistant(
+    def test_uses_default_application_runtime(self) -> None:
+        """Normal messages should use the assembled runtime."""
+        runtime = FakeRuntime(
             responses=[
                 "Réponse persistante.",
             ]
@@ -146,9 +146,9 @@ class TerminalTests(unittest.TestCase):
         with (
             patch(
                 "assistant_ia.interfaces.terminal."
-                "build_default_assistant",
-                return_value=assistant,
-            ) as build_assistant,
+                "build_default_runtime",
+                return_value=runtime,
+            ) as build_runtime,
             patch(
                 "builtins.input",
                 side_effect=[
@@ -160,11 +160,11 @@ class TerminalTests(unittest.TestCase):
         ):
             run_terminal()
 
-        build_assistant.assert_called_once_with(
+        build_runtime.assert_called_once_with(
             confirmation_handler=request_terminal_confirmation,
         )
         self.assertEqual(
-            assistant.received_messages,
+            runtime.received_messages,
             [
                 "Bonjour.",
             ],
@@ -178,16 +178,16 @@ class TerminalTests(unittest.TestCase):
             output.getvalue(),
         )
 
-    def test_reset_command_uses_assistant_core(self) -> None:
-        """The reset command should clear the current conversation."""
-        assistant = FakeAssistant()
+    def test_reset_command_uses_runtime(self) -> None:
+        """The reset command should use the runtime boundary."""
+        runtime = FakeRuntime()
         output = StringIO()
 
         with (
             patch(
                 "assistant_ia.interfaces.terminal."
-                "build_default_assistant",
-                return_value=assistant,
+                "build_default_runtime",
+                return_value=runtime,
             ),
             patch(
                 "builtins.input",
@@ -201,7 +201,7 @@ class TerminalTests(unittest.TestCase):
             run_terminal()
 
         self.assertEqual(
-            assistant.reset_count,
+            runtime.reset_count,
             1,
         )
         self.assertIn(
@@ -216,8 +216,8 @@ class TerminalTests(unittest.TestCase):
         with (
             patch(
                 "assistant_ia.interfaces.terminal."
-                "build_default_assistant",
-                return_value=FailingAssistant(),
+                "build_default_runtime",
+                return_value=FailingRuntime(),
             ),
             patch(
                 "builtins.input",
@@ -246,7 +246,7 @@ class TerminalTests(unittest.TestCase):
         with (
             patch(
                 "assistant_ia.interfaces.terminal."
-                "build_default_assistant",
+                "build_default_runtime",
                 side_effect=ApplicationInitializationError(
                     "Simulated database failure."
                 ),

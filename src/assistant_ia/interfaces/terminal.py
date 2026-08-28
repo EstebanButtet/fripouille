@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from assistant_ia.application import (
     ApplicationInitializationError,
-    build_default_assistant,
+    build_default_runtime,
 )
 from assistant_ia.core.assistant import AssistantCoreError
 from assistant_ia.security.confirmation import ConfirmationRequest
@@ -76,7 +76,7 @@ def run_terminal() -> None:
     display_welcome()
 
     try:
-        assistant = build_default_assistant(
+        runtime = build_default_runtime(
             confirmation_handler=request_terminal_confirmation,
         )
     except ApplicationInitializationError:
@@ -103,13 +103,13 @@ def run_terminal() -> None:
                 continue
 
             if normalized_message == COMMAND_RESET:
-                assistant.reset_conversation()
+                runtime.reset_conversation()
                 display_assistant_message(
                     "La conversation a été réinitialisée."
                 )
                 continue
 
-            response = assistant.process_message(
+            response = runtime.process_message(
                 user_message
             )
             display_assistant_message(response)

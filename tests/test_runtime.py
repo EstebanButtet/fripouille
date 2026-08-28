@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 
 from assistant_ia.core.assistant import AssistantCore
 from assistant_ia.core.context import ConversationMessage
@@ -44,6 +45,18 @@ class RecordingPresenter:
     ) -> None:
         self.responses.append(
             response
+        )
+
+
+class FailingPresenter:
+    """Raise a deterministic external presentation failure."""
+
+    def present(
+        self,
+        response: str,
+    ) -> None:
+        raise RuntimeError(
+            "Simulated presentation failure."
         )
 
 
@@ -146,6 +159,59 @@ class AssistantRuntimeTests(unittest.TestCase):
         self.assertNotEqual(
             result,
             "Fake model action success.",
+        )
+
+    def test_presentation_failure_preserves_completed_turn(
+        self,
+    ) -> None:
+        assistant = AssistantCore(
+            model_client=FakeModelClient(
+                [
+                    ModelResponse(
+                        content="Réponse finale.",
+                        model="fake-model",
+                        intent=Intent(
+                            name="conversation",
+                        ),
+                    )
+                ]
+            )
+        )
+        runtime = AssistantRuntime(
+            assistant,
+            presenter=FailingPresenter(),
+        )
+
+        with (
+            patch.object(
+                assistant,
+                "process_message",
+                wraps=assistant.process_message,
+            ) as process_message,
+            self.assertRaisesRegex(
+                RuntimeError,
+                "Simulated presentation failure",
+            ),
+        ):
+            runtime.process_message(
+                "Question."
+            )
+
+        process_message.assert_called_once_with(
+            "Question."
+        )
+        self.assertEqual(
+            assistant.context.messages,
+            (
+                ConversationMessage(
+                    role="user",
+                    content="Question.",
+                ),
+                ConversationMessage(
+                    role="assistant",
+                    content="Réponse finale.",
+                ),
+            ),
         )
 
     def test_reset_delegates_to_assistant_core(self) -> None:
