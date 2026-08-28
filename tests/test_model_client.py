@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from unittest.mock import patch
 from urllib.request import Request
 
@@ -19,6 +21,8 @@ from assistant_ia.intelligence.prompt import (
     INTERPRETATION_RESPONSE_SCHEMA,
     INTERPRETATION_SYSTEM_PROMPT,
 )
+from assistant_ia.memory.memory_repository import MemoryRepository
+from assistant_ia.memory.repository import SQLiteDatabase
 
 
 class FakeHTTPResponse:
@@ -539,6 +543,81 @@ class OllamaModelClientTests(unittest.TestCase):
             self.assertEqual(
                 payload["messages"][1:],
                 expected_turn_messages,
+            )
+
+    def test_both_stages_use_projection_without_persistent_memory(
+        self,
+    ) -> None:
+        """Both model calls should receive only bounded session history."""
+        history = tuple(
+            message
+            for index in range(5)
+            for message in (
+                ConversationMessage(
+                    role="user",
+                    content=f"Question {index}",
+                ),
+                ConversationMessage(
+                    role="assistant",
+                    content=f"Réponse {index}",
+                ),
+            )
+        )
+        current = ConversationMessage(
+            role="user",
+            content="Question courante complète.",
+        )
+        captured_payloads, fake_urlopen = (
+            build_two_stage_urlopen()
+        )
+        persistent_content = "SOUVENIR_PERSISTANT_NON_INJECTÉ"
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = SQLiteDatabase(
+                Path(directory) / "assistant.db"
+            )
+            database.initialize()
+            MemoryRepository(database).save_memory(
+                persistent_content
+            )
+
+            with patch(
+                "assistant_ia.intelligence.model_client.urlopen",
+                side_effect=fake_urlopen,
+            ):
+                OllamaModelClient().generate_response(
+                    history + (current,)
+                )
+
+        expected_history = [
+            {
+                "role": message.role,
+                "content": message.content,
+            }
+            for message in history[-8:]
+        ]
+
+        self.assertEqual(len(captured_payloads), 2)
+
+        for payload in captured_payloads:
+            sent_messages = payload["messages"]
+            self.assertEqual(
+                sent_messages[1:9],
+                expected_history,
+            )
+            self.assertEqual(
+                sent_messages[-1],
+                {
+                    "role": "user",
+                    "content": current.content,
+                },
+            )
+            self.assertNotIn(
+                persistent_content,
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                ),
             )
 
     def test_rejects_history_without_current_user_message(
