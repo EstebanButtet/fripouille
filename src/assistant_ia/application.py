@@ -34,7 +34,11 @@ from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import build_default_person
 from assistant_ia.security.confirmation import ConfirmationHandler
 from assistant_ia.security.permissions import PermissionPolicy
-from assistant_ia.runtime import AssistantRuntime, ResponsePresenter
+from assistant_ia.runtime import (
+    AssistantRuntime,
+    DiagnosticReporter,
+    ResponsePresenter,
+)
 from assistant_ia.system.windows import WindowsApplicationLauncher
 
 
@@ -208,6 +212,7 @@ def build_default_runtime(
     identity: AssistantIdentity | None = None,
     person_context: ActivePersonContext | None = None,
     presenter: ResponsePresenter | None = None,
+    diagnostic_reporter: DiagnosticReporter | None = None,
 ) -> AssistantRuntime:
     """Build the default assistant runtime with optional presentation."""
     assistant = build_default_assistant(
@@ -225,4 +230,5 @@ def build_default_runtime(
     return AssistantRuntime(
         assistant=assistant,
         presenter=presenter,
+        diagnostic_reporter=diagnostic_reporter,
     )

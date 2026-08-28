@@ -7,6 +7,7 @@ from assistant_ia.application import (
     build_default_runtime,
 )
 from assistant_ia.core.assistant import AssistantCoreError
+from assistant_ia.interfaces.diagnostics import ConsoleDiagnosticReporter
 from assistant_ia.security.confirmation import ConfirmationRequest
 
 APP_TITLE = "Assistant IA personnel"
@@ -71,14 +72,20 @@ def request_terminal_confirmation(
     }
 
 
-def run_terminal() -> None:
+def run_terminal(*, debug: bool = False) -> None:
     """Start and manage the interactive terminal session."""
     display_welcome()
 
     try:
-        runtime = build_default_runtime(
-            confirmation_handler=request_terminal_confirmation,
-        )
+        if debug:
+            runtime = build_default_runtime(
+                confirmation_handler=request_terminal_confirmation,
+                diagnostic_reporter=ConsoleDiagnosticReporter(),
+            )
+        else:
+            runtime = build_default_runtime(
+                confirmation_handler=request_terminal_confirmation,
+            )
     except ApplicationInitializationError:
         display_assistant_message(
             DATABASE_ERROR_MESSAGE

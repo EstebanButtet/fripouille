@@ -143,6 +143,28 @@ class ContextualMemoryPromptTests(unittest.TestCase):
             normalized_prompt,
         )
 
+    def test_user_preference_is_not_adopted_by_assistant(self) -> None:
+        prompt = build_conversation_prompt(
+            build_default_identity(),
+            contextual_memories=(
+                self._retrieved_memory(
+                    1,
+                    "Mon animal préféré est le renard.",
+                ),
+            ),
+        )
+        normalized_prompt = " ".join(prompt.split())
+
+        self.assertIn(
+            "First-person wording copied from a user's statement "
+            "still describes that user",
+            normalized_prompt,
+        )
+        self.assertIn(
+            "Do not adopt a recalled user preference",
+            normalized_prompt,
+        )
+
     def test_limits_count_while_preserving_retrieval_order(self) -> None:
         """Only the five highest-ranked whole memories should remain."""
         memories = tuple(
