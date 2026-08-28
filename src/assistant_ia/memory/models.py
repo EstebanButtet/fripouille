@@ -157,6 +157,45 @@ class Memory:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryCandidate:
+    """Represent one validated but non-persistent memory proposal."""
+
+    content: str
+    source_text: str
+    confidence: float
+
+    def __post_init__(self) -> None:
+        """Validate candidate content, exact evidence and confidence."""
+        object.__setattr__(
+            self,
+            "content",
+            _normalize_required_text(
+                self.content,
+                field_name="Memory candidate content",
+            ),
+        )
+        validated_source_text = _validate_optional_source_text(
+            self.source_text
+        )
+
+        if validated_source_text is None:
+            raise ValueError(
+                "Memory candidate source text is required."
+            )
+
+        object.__setattr__(
+            self,
+            "source_text",
+            validated_source_text,
+        )
+        object.__setattr__(
+            self,
+            "confidence",
+            _normalize_memory_confidence(self.confidence),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class JournalEntry:
     """Represent one persisted journal entry."""
 

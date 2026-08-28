@@ -9,6 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from assistant_ia.memory.models import (
     JournalEntry,
     Memory,
+    MemoryCandidate,
     Task,
 )
 
@@ -397,6 +398,66 @@ class MemoryTests(unittest.TestCase):
 
         with self.assertRaises(FrozenInstanceError):
             memory.content = "Autre contenu."
+
+
+class MemoryCandidateTests(unittest.TestCase):
+    """Validate the non-persistent candidate domain model."""
+
+    def test_preserves_valid_exact_candidate_evidence(self) -> None:
+        candidate = MemoryCandidate(
+            content=" Mon logiciel prefere est SolidWorks. ",
+            source_text="Mon logiciel prefere est SolidWorks.",
+            confidence=0.9,
+        )
+
+        self.assertEqual(
+            candidate.content,
+            "Mon logiciel prefere est SolidWorks.",
+        )
+        self.assertEqual(
+            candidate.source_text,
+            "Mon logiciel prefere est SolidWorks.",
+        )
+        self.assertEqual(candidate.confidence, 0.9)
+
+    def test_rejects_empty_candidate_content_or_source(self) -> None:
+        for values in (
+            {"content": " ", "source_text": "preuve"},
+            {"content": "fait", "source_text": " "},
+        ):
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                MemoryCandidate(confidence=0.9, **values)
+
+    def test_accepts_candidate_confidence_boundaries(self) -> None:
+        for confidence in (0.0, 1.0):
+            with self.subTest(confidence=confidence):
+                candidate = MemoryCandidate(
+                    content="fait",
+                    source_text="fait",
+                    confidence=confidence,
+                )
+                self.assertEqual(candidate.confidence, confidence)
+
+    def test_rejects_invalid_candidate_confidence(self) -> None:
+        for confidence in (-0.1, 1.1, float("nan"), float("inf")):
+            with self.subTest(confidence=confidence), self.assertRaises(
+                (TypeError, ValueError)
+            ):
+                MemoryCandidate(
+                    content="fait",
+                    source_text="fait",
+                    confidence=confidence,
+                )
+
+    def test_candidate_is_immutable(self) -> None:
+        candidate = MemoryCandidate(
+            content="fait",
+            source_text="fait",
+            confidence=0.9,
+        )
+
+        with self.assertRaises(FrozenInstanceError):
+            candidate.content = "autre"
 
 
 class JournalEntryTests(unittest.TestCase):

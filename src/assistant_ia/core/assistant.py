@@ -14,12 +14,17 @@ from assistant_ia.actions.registry import (
 from assistant_ia.core.context import ConversationContext
 from assistant_ia.identity.defaults import build_default_identity
 from assistant_ia.intelligence.intent import Intent
+from assistant_ia.intelligence.memory_candidates import (
+    MemoryCandidateAnalysisError,
+    MemoryCandidateAnalyzer,
+)
 from assistant_ia.intelligence.model_client import (
     ModelClient,
     ModelClientError,
     OllamaModelClient,
 )
 from assistant_ia.intelligence.response import ModelResponse
+from assistant_ia.memory.models import MemoryCandidate
 from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import build_default_person
 from assistant_ia.people.presentation import detect_presented_person
@@ -50,6 +55,9 @@ class AssistantCore:
         context: ConversationContext | None = None,
         action_registry: ActionRegistry | None = None,
         person_context: ActivePersonContext | None = None,
+        memory_candidate_analyzer: (
+            MemoryCandidateAnalyzer | None
+        ) = None,
     ) -> None:
         """Create the assistant core with optional injected dependencies."""
         if (
@@ -99,6 +107,10 @@ class AssistantCore:
             else ActionRegistry()
         )
         self._last_intent: Intent | None = None
+        self._memory_candidate_analyzer = memory_candidate_analyzer
+        self._last_memory_candidates: tuple[
+            MemoryCandidate, ...
+        ] = ()
 
     @property
     def context(self) -> ConversationContext:
@@ -120,9 +132,17 @@ class AssistantCore:
         """Return the last successfully identified intent."""
         return self._last_intent
 
+    @property
+    def last_memory_candidates(
+        self,
+    ) -> tuple[MemoryCandidate, ...]:
+        """Return validated non-persistent candidates from the last turn."""
+        return self._last_memory_candidates
+
     def process_message(self, user_message: str) -> str:
         """Process one user message and return the assistant response."""
-        self._context.add_user_message(user_message)
+        self._last_memory_candidates = ()
+        current_user_message = self._context.add_user_message(user_message)
 
         presented_person = detect_presented_person(
             user_message
@@ -162,6 +182,19 @@ class AssistantCore:
             assistant_content
         )
 
+        if (
+            resolved_intent.name == "conversation"
+            and self._memory_candidate_analyzer is not None
+        ):
+            try:
+                self._last_memory_candidates = (
+                    self._memory_candidate_analyzer.analyze(
+                        current_user_message.content
+                    )
+                )
+            except MemoryCandidateAnalysisError:
+                self._last_memory_candidates = ()
+
         return assistant_content
 
     def reset_conversation(self) -> None:
@@ -169,6 +202,7 @@ class AssistantCore:
         self._context.clear()
         self._person_context.reset()
         self._last_intent = None
+        self._last_memory_candidates = ()
 
     def _resolve_assistant_content(
         self,
