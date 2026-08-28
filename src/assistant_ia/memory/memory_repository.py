@@ -15,6 +15,8 @@ from assistant_ia.memory.repository import SQLiteDatabase
 
 DEFAULT_MEMORY_RESULT_LIMIT = 20
 MAX_MEMORY_RESULT_LIMIT = 100
+DEFAULT_MEMORY_LIST_LIMIT = 500
+MAX_MEMORY_LIST_LIMIT = 1000
 
 _MEMORY_SELECT_COLUMNS = """
     SELECT
@@ -137,6 +139,28 @@ class MemoryRepository:
                     search_pattern,
                     normalized_limit,
                 ),
+            ).fetchall()
+
+        return tuple(
+            _memory_from_row(memory_row)
+            for memory_row in memory_rows
+        )
+
+    def list_memories(
+        self,
+        limit: int = DEFAULT_MEMORY_LIST_LIMIT,
+    ) -> tuple[Memory, ...]:
+        """Return a bounded recent memory set for local processing."""
+        normalized_limit = _validate_list_limit(limit)
+
+        with self._database.connect() as connection:
+            memory_rows = connection.execute(
+                f"""
+                {_MEMORY_SELECT_COLUMNS}
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (normalized_limit,),
             ).fetchall()
 
         return tuple(
@@ -267,6 +291,21 @@ def _validate_result_limit(limit: int) -> int:
     if limit < 1 or limit > MAX_MEMORY_RESULT_LIMIT:
         raise ValueError(
             "Memory result limit must be between 1 and 100."
+        )
+
+    return limit
+
+
+def _validate_list_limit(limit: int) -> int:
+    """Return a bounded positive memory listing limit."""
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise TypeError(
+            "Memory list limit must be an integer."
+        )
+
+    if limit < 1 or limit > MAX_MEMORY_LIST_LIMIT:
+        raise ValueError(
+            "Memory list limit must be between 1 and 1000."
         )
 
     return limit

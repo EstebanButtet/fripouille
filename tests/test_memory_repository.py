@@ -217,6 +217,36 @@ class MemoryRepositoryTests(unittest.TestCase):
             ),
         )
 
+    def test_lists_a_bounded_recent_candidate_set(self) -> None:
+        """Repository listing should support bounded local processing."""
+        repository = self._repository(
+            self.first_time,
+            self.second_time,
+            self.third_time,
+        )
+        repository.save_memory("Premier souvenir.")
+        second = repository.save_memory("Deuxième souvenir.")
+        third = repository.save_memory("Troisième souvenir.")
+
+        self.assertEqual(
+            repository.list_memories(limit=2),
+            (third, second),
+        )
+
+    def test_rejects_invalid_memory_list_limit(self) -> None:
+        """Repository candidate listings must remain strictly bounded."""
+        repository = self._repository()
+
+        for limit in (0, 1001):
+            with (
+                self.subTest(limit=limit),
+                self.assertRaisesRegex(
+                    ValueError,
+                    "between 1 and 1000",
+                ),
+            ):
+                repository.list_memories(limit=limit)
+
     def test_rejects_invalid_result_limit(self) -> None:
         """Memory result limits should remain within safe bounds."""
         repository = self._repository()
