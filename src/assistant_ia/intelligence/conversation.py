@@ -1,4 +1,10 @@
-"""Internal directives for conversational response generation."""
+"""Directives internes qui choisissent le mode de génération conversationnel.
+
+Ollama peut proposer un mode spécialisé, mais cette proposition reste non
+fiable. :func:`resolve_conversation_directive` la recoupe avec le texte exact
+de l'utilisateur avant de produire une directive autorisée. Ce module ne
+génère aucun texte et n'exécute aucune action.
+"""
 
 from __future__ import annotations
 
@@ -14,24 +20,30 @@ from assistant_ia.intelligence.allocation import (
 
 
 class ConversationMode(str, Enum):
-    """Identify one internal conversational generation mode."""
+    """Énumérer les seuls modes de génération connus de l'application."""
 
     STANDARD = "standard"
     FIXED_TOTAL_ALLOCATION = "fixed_total_allocation"
 
 
 class ConversationDirectiveResolutionError(ValueError):
-    """Raised when an untrusted directive proposal cannot be verified."""
+    """Signaler qu'une proposition du modèle ne peut pas être vérifiée."""
 
 
 @dataclass(frozen=True, slots=True)
 class ConversationDirectiveProposal:
-    """Represent untrusted model-proposed conversation routing metadata."""
+    """Porter des métadonnées de routage proposées par le modèle.
+
+    ``target_text`` est une preuve textuelle annoncée, pas encore une valeur
+    autoritative. Le mot « Proposal » rappelle que cet objet ne doit pas être
+    utilisé directement pour calculer une répartition.
+    """
 
     mode: ConversationMode
     target_text: str | None = None
 
     def __post_init__(self) -> None:
+        """Vérifier la cohérence entre le mode proposé et son texte cible."""
         if not isinstance(self.mode, ConversationMode):
             raise TypeError(
                 "Conversation directive proposal mode must be a "
@@ -88,7 +100,7 @@ class ConversationDirectiveProposal:
     def standard(
         cls,
     ) -> "ConversationDirectiveProposal":
-        """Build an ordinary conversation proposal."""
+        """Construire une proposition de conversation ordinaire."""
         return cls(
             mode=ConversationMode.STANDARD,
             target_text=None,
@@ -99,7 +111,7 @@ class ConversationDirectiveProposal:
         cls,
         target_text: str,
     ) -> "ConversationDirectiveProposal":
-        """Build a fixed-total proposal anchored to user text."""
+        """Construire une proposition de total fixe ancrée dans le message."""
         return cls(
             mode=ConversationMode.FIXED_TOTAL_ALLOCATION,
             target_text=target_text,
@@ -108,12 +120,17 @@ class ConversationDirectiveProposal:
 
 @dataclass(frozen=True, slots=True)
 class ConversationDirective:
-    """Describe how one conversational response should be generated."""
+    """Décrire un mode de génération vérifié par l'application.
+
+    Contrairement à la proposition, ``allocation_target`` est un total exact
+    construit déterministement depuis le message utilisateur.
+    """
 
     mode: ConversationMode
     allocation_target: AllocationTarget | None = None
 
     def __post_init__(self) -> None:
+        """Garantir que le mode vérifié possède exactement les données requises."""
         if not isinstance(self.mode, ConversationMode):
             raise TypeError(
                 "Conversation directive mode must be a ConversationMode."
@@ -157,7 +174,7 @@ class ConversationDirective:
     def standard(
         cls,
     ) -> "ConversationDirective":
-        """Build the ordinary conversational generation directive."""
+        """Construire la directive de génération conversationnelle ordinaire."""
         return cls(
             mode=ConversationMode.STANDARD,
             allocation_target=None,
@@ -168,7 +185,7 @@ class ConversationDirective:
         cls,
         target: AllocationTarget,
     ) -> "ConversationDirective":
-        """Build a fixed-total conversational generation directive."""
+        """Construire une directive de répartition avec sa cible autoritative."""
         return cls(
             mode=ConversationMode.FIXED_TOTAL_ALLOCATION,
             allocation_target=target,
@@ -213,7 +230,7 @@ _RANGE_OR_BOUND_SUFFIX_PATTERNS = (
 def _normalize_directive_evidence_text(
     value: str,
 ) -> str:
-    """Normalize case and whitespace without changing semantic content."""
+    """Normaliser casse et espaces sans réinterpréter le contenu."""
     return " ".join(
         value.strip().casefold().split()
     )
@@ -224,7 +241,7 @@ def _duration_evidence_occurrences(
     target_text: str,
     user_message: str,
 ) -> tuple[tuple[int, int], ...]:
-    """Locate standalone occurrences of target evidence in the message."""
+    """Localiser les occurrences autonomes de la preuve dans le message."""
     pattern = re.compile(
         r"(?<!\w)"
         + re.escape(target_text)
@@ -248,7 +265,7 @@ def _has_unsafe_duration_context(
     start: int,
     end: int,
 ) -> bool:
-    """Detect approximation, ranges or bounds around one duration."""
+    """Détecter approximation, intervalle ou borne autour d'une durée."""
     prefix = user_message[:start]
     suffix = user_message[end:]
 
@@ -300,7 +317,13 @@ def resolve_conversation_directive(
     *,
     user_message: str,
 ) -> ConversationDirective:
-    """Resolve untrusted model metadata against authoritative user text."""
+    """Résoudre une proposition non fiable contre le texte utilisateur.
+
+    La durée doit apparaître textuellement, hors contexte approximatif ou
+    borné, puis être comprise par le parseur déterministe. Sinon une
+    ``ConversationDirectiveResolutionError`` est levée et le client revient à
+    la conversation standard.
+    """
     if not isinstance(
         proposal,
         ConversationDirectiveProposal,
@@ -338,6 +361,8 @@ def resolve_conversation_directive(
         user_message
     )
 
+    # La proposition du LLM fournit seulement une piste. La source d'autorité
+    # reste le texte réellement envoyé par l'utilisateur.
     occurrences = _duration_evidence_occurrences(
         target_text=normalized_target,
         user_message=normalized_message,

@@ -1,4 +1,12 @@
-"""Dedicated Ollama analysis for non-persistent memory candidates."""
+"""Analyse Ollama dédiée aux candidats mémoire non persistants.
+
+Le message utilisateur courant est d'abord filtré localement, puis envoyé à
+un prompt structuré distinct de la conversation. Chaque proposition reçue est
+recoupée avec le texte autorisé, bornée et reconstruite en
+:class:`MemoryCandidate`. Ce module ne consulte pas SQLite et ne décide jamais
+qu'un candidat doit devenir un souvenir : cette responsabilité appartient au
+service de promotion de :mod:`assistant_ia.memory.promotion`.
+"""
 
 from __future__ import annotations
 
@@ -135,22 +143,27 @@ _SECRET_PATTERNS = tuple(
 
 
 class MemoryCandidateAnalysisError(RuntimeError):
-    """Raised when candidate analysis cannot be completed safely."""
+    """Signaler que l'analyse ne peut pas produire un résultat sûr."""
 
 
 class MemoryCandidateAnalyzer(Protocol):
-    """Define non-persistent analysis of one authorized user message."""
+    """Contrat d'analyse non persistante d'un message utilisateur autorisé."""
 
     def analyze(
         self,
         user_message: str,
     ) -> tuple[MemoryCandidate, ...]:
-        """Return deterministically validated candidate memories."""
+        """Retourner uniquement les candidats validés déterministement."""
         ...
 
 
 class OllamaMemoryCandidateAnalyzer:
-    """Produce deterministically validated candidates from one user message."""
+    """Extraire avec Ollama puis valider localement des candidats mémoire.
+
+    ``confidence`` mesure ici la fidélité et l'admissibilité de l'extraction,
+    jamais la vérité du fait dans le monde. L'analyse reste une proposition
+    sans identifiant et sans effet de persistance.
+    """
 
     def __init__(
         self,
@@ -158,7 +171,7 @@ class OllamaMemoryCandidateAnalyzer:
         base_url: str = DEFAULT_OLLAMA_BASE_URL,
         timeout: float = DEFAULT_OLLAMA_TIMEOUT,
     ) -> None:
-        """Create a dedicated local structured analyzer."""
+        """Créer l'analyseur local avec sa configuration Ollama dédiée."""
         if not isinstance(model, str) or not model.strip():
             raise ValueError("Candidate analyzer model cannot be empty.")
         if not isinstance(base_url, str) or not base_url.strip():
@@ -173,7 +186,11 @@ class OllamaMemoryCandidateAnalyzer:
         self._timeout = float(timeout)
 
     def analyze(self, user_message: str) -> tuple[MemoryCandidate, ...]:
-        """Analyze one authorized user message without persisting results."""
+        """Analyser un message autorisé sans jamais persister le résultat.
+
+        Un message vide, trop long, secret ou manifestement inadmissible est
+        rejeté avant l'appel réseau et retourne un tuple vide.
+        """
         if not isinstance(user_message, str):
             raise TypeError("Candidate source message must be a string.")
 
@@ -188,6 +205,8 @@ class OllamaMemoryCandidateAnalyzer:
         if _is_inadmissible_statement(authorized_message):
             return ()
 
+        # L'analyse utilise uniquement le message courant : ni historique ni
+        # réponse assistant ne peuvent servir de preuve à un souvenir.
         payload = {
             "model": self._model,
             "messages": [
@@ -211,7 +230,7 @@ class OllamaMemoryCandidateAnalyzer:
         )
 
     def _request_ollama(self, payload: dict[str, object]) -> str:
-        """Send one dedicated structured request to local Ollama."""
+        """Envoyer la requête structurée dédiée à l'Ollama local."""
         request = Request(
             url=f"{self._base_url}{_OLLAMA_CHAT_PATH}",
             data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
@@ -253,7 +272,12 @@ def _parse_candidate_response(
     *,
     authorized_message: str,
 ) -> tuple[MemoryCandidate, ...]:
-    """Parse strict candidate JSON and reject unsafe individual entries."""
+    """Décoder le JSON strict et éliminer les entrées individuelles non sûres.
+
+    Une enveloppe mal formée invalide toute l'analyse ; un candidat isolé qui
+    échoue aux règles est simplement ignoré. Les doublons textuels sont
+    supprimés en conservant le premier candidat accepté.
+    """
     try:
         data = json.loads(response_content)
     except (TypeError, JSONDecodeError) as error:
@@ -298,7 +322,12 @@ def _validated_candidate(
     *,
     authorized_message: str,
 ) -> MemoryCandidate | None:
-    """Return one admissible grounded candidate or reject it."""
+    """Retourner un candidat ancré et admissible, sinon ``None``.
+
+    Les contrôles portent notamment sur les bornes, la fidélité lexicale, la
+    présence exacte de ``source_text`` et l'absence de secrets. Ils compensent
+    le caractère probabiliste de la sortie Ollama.
+    """
     content = data.get("content")
     source_text = data.get("source_text")
     confidence = data.get("confidence")
@@ -355,6 +384,7 @@ def _validated_candidate(
 
 
 def _normalized_text(value: str) -> str:
+    """Normaliser casse et accents pour les comparaisons lexicales internes."""
     return "".join(
         character
         for character in unicodedata.normalize("NFKD", value.casefold())
@@ -363,12 +393,14 @@ def _normalized_text(value: str) -> str:
 
 
 def _content_is_lexically_grounded(content: str, message: str) -> bool:
+    """Vérifier que chaque terme du candidat apparaît dans le message source."""
     content_terms = set(_WORD_PATTERN.findall(_normalized_text(content)))
     message_terms = set(_WORD_PATTERN.findall(_normalized_text(message)))
     return bool(content_terms) and content_terms.issubset(message_terms)
 
 
 def _is_inadmissible_statement(value: str) -> bool:
+    """Détecter une question, hypothèse, instruction ou information temporaire."""
     normalized = _normalized_text(value).strip()
     if any(pattern.search(normalized) for pattern in _INADMISSIBLE_PATTERNS):
         return True
@@ -378,6 +410,7 @@ def _is_inadmissible_statement(value: str) -> bool:
 
 
 def _is_explicit_personal_correction(value: str) -> bool:
+    """Reconnaître une correction explicitement personnelle dans le texte."""
     normalized = _normalized_text(value)
     return bool(
         _CORRECTION_MARKER_PATTERN.search(normalized)
@@ -389,6 +422,7 @@ def _has_sufficient_correction_coverage(
     content: str,
     authorized_message: str,
 ) -> bool:
+    """Exiger qu'une correction conserve une part suffisante du message."""
     content_terms = set(_WORD_PATTERN.findall(_normalized_text(content)))
     message_terms = set(
         _WORD_PATTERN.findall(_normalized_text(authorized_message))
@@ -399,6 +433,7 @@ def _has_sufficient_correction_coverage(
 
 
 def _has_explicit_correction_evidence(value: str) -> bool:
+    """Vérifier la présence conjointe d'un marqueur et d'un sujet personnel."""
     normalized = _normalized_text(value)
     return bool(
         _CORRECTION_EVIDENCE_PATTERN.search(normalized)
@@ -407,5 +442,6 @@ def _has_explicit_correction_evidence(value: str) -> bool:
 
 
 def _contains_secret(value: str) -> bool:
+    """Détecter les formes de secrets explicitement interdites à la mémoire."""
     normalized = _normalized_text(value)
     return any(pattern.search(normalized) for pattern in _SECRET_PATTERNS)

@@ -1,4 +1,9 @@
-"""Detection of explicit conversational self-presentations."""
+"""Détection déterministe d'une présentation explicite du locuteur.
+
+Seules quelques phrases complètes reconnues produisent un ``PersonProfile``.
+Une simple mention de nom, une déduction du LLM ou une phrase plus large ne
+change pas la personne active. Le résultat reste temporaire à la session.
+"""
 
 from __future__ import annotations
 
@@ -43,7 +48,11 @@ _PRESENTATION_PATTERNS = (
 def detect_presented_person(
     message: str,
 ) -> PersonProfile | None:
-    """Return a person only for an explicit self-presentation."""
+    """Retourner une personne uniquement pour une présentation explicite.
+
+    Le message est normalisé en Unicode NFC puis comparé entièrement aux motifs
+    autorisés. Retourne ``None`` lorsque la preuve est absente ou ambiguë.
+    """
     if not isinstance(message, str):
         raise TypeError(
             "Presentation message must be a string."
@@ -54,6 +63,8 @@ def detect_presented_person(
         message,
     ).strip()
 
+    # ``fullmatch`` empêche une sous-phrase telle qu'une citation de déclencher
+    # involontairement un changement de locuteur.
     for pattern in _PRESENTATION_PATTERNS:
         match = pattern.fullmatch(
             normalized_message

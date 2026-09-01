@@ -1,4 +1,14 @@
-"""Windows serial connection for assistant hardware."""
+"""Connexion série Windows de bas niveau pour le hardware de Fripouille.
+
+Le module adapte l'API Win32, appelée via ``ctypes``, au petit contrat
+``SerialConnection`` attendu par le transport cadré. Il configure un port COM
+en 115200 bauds, 8 bits, sans parité, un bit d'arrêt, puis expose seulement des
+lectures et écritures d'octets.
+
+Cette couche est volontairement éloignée du LLM : elle ne reçoit jamais une
+intention ou un prompt, seulement les cadres déjà produits par la chaîne
+logicielle contrôlée.
+"""
 
 from __future__ import annotations
 
@@ -32,11 +42,15 @@ _PORT_PATTERN = re.compile(
 
 
 class WindowsSerialConnectionError(HardwareTransportError):
-    """Raised when Windows serial communication cannot be used."""
+    """Signaler que la communication série Win32 n'est pas utilisable."""
 
 
 class _DCB(ctypes.Structure):
-    """Win32 device-control block."""
+    """Reproduire en Python la structure Win32 de configuration du port.
+
+    ``ctypes.Structure`` décrit ici la disposition mémoire attendue par l'API C ;
+    les champs ne sont pas un modèle métier de Fripouille.
+    """
 
     _fields_ = [
         ("DCBlength", wintypes.DWORD),
@@ -71,7 +85,7 @@ class _DCB(ctypes.Structure):
 
 
 class _COMMTIMEOUTS(ctypes.Structure):
-    """Win32 serial read and write timeout configuration."""
+    """Reproduire la structure Win32 des délais de lecture et d'écriture."""
 
     _fields_ = [
         ("ReadIntervalTimeout", wintypes.DWORD),
@@ -83,55 +97,64 @@ class _COMMTIMEOUTS(ctypes.Structure):
 
 
 class _WindowsSerialApi(Protocol):
-    """Provide the Win32 operations required by the connection."""
+    """Contrat des seules opérations Win32 nécessaires à la connexion.
+
+    Cette abstraction permet d'injecter un faux Win32 dans les tests sans port
+    COM réel.
+    """
 
     def open_port(self, device_path: str) -> object:
-        """Open one serial device."""
+        """Ouvrir un périphérique série."""
 
     def configure_port(
         self,
         handle: object,
         baud_rate: int,
     ) -> None:
-        """Configure one serial device."""
+        """Configurer un périphérique série."""
 
     def configure_timeouts(
         self,
         handle: object,
     ) -> None:
-        """Configure serial read and write timeouts."""
+        """Configurer les délais de lecture et d'écriture."""
 
     def purge_input(
         self,
         handle: object,
     ) -> None:
-        """Discard stale input bytes."""
+        """Éliminer les octets d'entrée devenus obsolètes."""
 
     def read(
         self,
         handle: object,
         max_bytes: int,
     ) -> bytes:
-        """Read currently available bytes."""
+        """Lire les octets actuellement disponibles."""
 
     def write(
         self,
         handle: object,
         data: bytes,
     ) -> None:
-        """Write all supplied bytes."""
+        """Écrire tous les octets fournis."""
 
     def close(
         self,
         handle: object,
     ) -> None:
-        """Close the Windows handle."""
+        """Fermer le handle Windows."""
 
 
 class _CtypesWindowsSerialApi:
-    """Call the Win32 serial API through the Python standard library."""
+    """Appeler l'API série Win32 au moyen de la bibliothèque standard."""
 
     def __init__(self) -> None:
+        """Charger ``kernel32`` et déclarer les signatures des fonctions C.
+
+        ``argtypes`` et ``restype`` indiquent à ctypes comment convertir les
+        valeurs Python et interpréter les résultats natifs.
+        """
         if os.name != "nt":
             raise OSError(
                 "Windows serial access requires Windows."
@@ -209,7 +232,7 @@ class _CtypesWindowsSerialApi:
         self._close_handle.restype = wintypes.BOOL
 
     def open_port(self, device_path: str) -> object:
-        """Open one COM device for exclusive read/write access."""
+        """Ouvrir un périphérique COM en lecture/écriture exclusive."""
         handle = self._create_file(
             device_path,
             _GENERIC_READ | _GENERIC_WRITE,
@@ -234,7 +257,7 @@ class _CtypesWindowsSerialApi:
         handle: object,
         baud_rate: int,
     ) -> None:
-        """Configure 115200 baud, 8 data bits, no parity, one stop bit."""
+        """Configurer 115200 bauds, 8 bits, sans parité, un bit d'arrêt."""
         dcb = _DCB()
         dcb.DCBlength = ctypes.sizeof(_DCB)
 
@@ -274,7 +297,7 @@ class _CtypesWindowsSerialApi:
         self,
         handle: object,
     ) -> None:
-        """Use immediate reads and a bounded write timeout."""
+        """Configurer des lectures immédiates et une écriture bornée."""
         timeouts = _COMMTIMEOUTS()
         timeouts.ReadIntervalTimeout = _MAX_DWORD
         timeouts.ReadTotalTimeoutMultiplier = 0
@@ -294,7 +317,7 @@ class _CtypesWindowsSerialApi:
         self,
         handle: object,
     ) -> None:
-        """Discard stale boot output accumulated after opening."""
+        """Éliminer la sortie de démarrage accumulée après l'ouverture."""
         if not self._purge_comm(
             handle,
             _PURGE_RXCLEAR,
@@ -308,7 +331,7 @@ class _CtypesWindowsSerialApi:
         handle: object,
         max_bytes: int,
     ) -> bytes:
-        """Return currently available serial bytes."""
+        """Retourner les octets série immédiatement disponibles."""
         buffer = ctypes.create_string_buffer(
             max_bytes
         )
@@ -332,7 +355,7 @@ class _CtypesWindowsSerialApi:
         handle: object,
         data: bytes,
     ) -> None:
-        """Write all bytes to the serial device."""
+        """Écrire tous les octets et refuser une écriture native partielle."""
         if not data:
             return
 
@@ -362,7 +385,7 @@ class _CtypesWindowsSerialApi:
         self,
         handle: object,
     ) -> None:
-        """Close the serial device handle."""
+        """Fermer le handle natif du périphérique série."""
         if not self._close_handle(handle):
             raise ctypes.WinError(
                 ctypes.get_last_error()
@@ -370,7 +393,12 @@ class _CtypesWindowsSerialApi:
 
 
 class WindowsSerialConnection:
-    """Provide raw serial access to Fripouille hardware on Windows."""
+    """Fournir l'accès série brut au hardware sous Windows.
+
+    Le constructeur possède l'ouverture et toute la configuration. Un délai de
+    démarrage laisse le microcontrôleur redémarrer, puis ses éventuels octets de
+    boot sont purgés avant le premier échange protocolaire.
+    """
 
     def __init__(
         self,
@@ -380,7 +408,11 @@ class WindowsSerialConnection:
         api: _WindowsSerialApi | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        """Open and configure one Windows COM port."""
+        """Ouvrir, configurer et préparer un port COM Windows.
+
+        Une initialisation partielle est nettoyée au mieux avant de convertir
+        l'erreur système en ``WindowsSerialConnectionError``.
+        """
         normalized_port = _normalize_port_name(
             port_name
         )
@@ -453,7 +485,7 @@ class WindowsSerialConnection:
         self,
         max_bytes: int,
     ) -> bytes:
-        """Read currently available raw serial bytes."""
+        """Lire au plus ``max_bytes`` octets bruts actuellement disponibles."""
         self._require_open()
 
         if (
@@ -483,7 +515,7 @@ class WindowsSerialConnection:
         self,
         data: bytes,
     ) -> None:
-        """Write raw bytes to the serial device."""
+        """Écrire des octets bruts sur le périphérique série ouvert."""
         self._require_open()
 
         if not isinstance(data, bytes):
@@ -502,7 +534,7 @@ class WindowsSerialConnection:
             ) from error
 
     def close(self) -> None:
-        """Close the serial connection once."""
+        """Fermer la connexion une seule fois et invalider son handle."""
         if self._closed:
             return
 
@@ -520,7 +552,7 @@ class WindowsSerialConnection:
             ) from error
 
     def _require_open(self) -> None:
-        """Reject operations after the connection is closed."""
+        """Refuser les opérations après fermeture de la connexion."""
         if self._closed:
             raise WindowsSerialConnectionError(
                 "Windows serial connection is closed."
@@ -529,7 +561,7 @@ class WindowsSerialConnection:
     def _close_after_initialization_failure(
         self,
     ) -> None:
-        """Best-effort cleanup after partial initialization."""
+        """Nettoyer au mieux un handle après une initialisation partielle."""
         if self._handle is None:
             return
 
@@ -546,7 +578,7 @@ class WindowsSerialConnection:
 def _normalize_port_name(
     port_name: str,
 ) -> str:
-    """Validate and normalize one Windows COM port name."""
+    """Valider et normaliser un nom de port Windows ``COM<number>``."""
     if not isinstance(port_name, str):
         raise TypeError(
             "Windows serial port name must be a string."

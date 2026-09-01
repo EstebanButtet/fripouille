@@ -1,4 +1,9 @@
-"""Windows assembly for the physical assistant display."""
+"""Assemblage Windows de toute la chaîne de présentation physique.
+
+Ce module ouvre le port COM puis relie, dans l'ordre, connexion brute,
+transport cadré, contrôleur d'écran et presenter de réponse. Il constitue une
+racine de composition matérielle et ne donne jamais la connexion brute au LLM.
+"""
 
 from __future__ import annotations
 
@@ -16,7 +21,7 @@ from assistant_ia.hardware.windows_serial import WindowsSerialConnection
 
 
 class SerialConnectionFactory(Protocol):
-    """Create one serial connection for a Windows COM port."""
+    """Contrat d'une fabrique de connexion pour un port COM Windows."""
 
     def __call__(
         self,
@@ -24,11 +29,15 @@ class SerialConnectionFactory(Protocol):
         *,
         startup_delay: float,
     ) -> SerialConnection:
-        """Open and return one serial connection."""
+        """Ouvrir et retourner une connexion série."""
 
 
 class WindowsDisplayPresenter:
-    """Own the complete Windows-to-display presentation chain."""
+    """Posséder toute la chaîne Windows jusqu'à l'écran physique.
+
+    L'instance garde le transport ouvert pendant son cycle de vie. ``close``
+    est idempotente et toute présentation ultérieure est refusée.
+    """
 
     def __init__(
         self,
@@ -40,7 +49,11 @@ class WindowsDisplayPresenter:
             WindowsSerialConnection
         ),
     ) -> None:
-        """Open and assemble the physical display connection."""
+        """Ouvrir le port et assembler les couches de présentation.
+
+        Si la construction du transport échoue après l'ouverture, la connexion
+        est immédiatement fermée afin d'éviter de conserver le port COM.
+        """
         if not callable(connection_factory):
             raise TypeError(
                 "Serial connection factory must be callable."
@@ -90,7 +103,7 @@ class WindowsDisplayPresenter:
         self,
         response: str,
     ) -> None:
-        """Present one final assistant response on the physical display."""
+        """Présenter une réponse finale via la chaîne contrôlée."""
         self._require_open()
 
         self._presenter.present(
@@ -98,7 +111,7 @@ class WindowsDisplayPresenter:
         )
 
     def close(self) -> None:
-        """Close the physical display connection once."""
+        """Fermer une seule fois la connexion de l'écran physique."""
         if self._closed:
             return
 
@@ -106,7 +119,7 @@ class WindowsDisplayPresenter:
         self._transport.close()
 
     def _require_open(self) -> None:
-        """Reject display operations after shutdown."""
+        """Refuser toute opération d'affichage après la fermeture."""
         if self._closed:
             raise HardwareTransportError(
                 "Windows display presenter is closed."

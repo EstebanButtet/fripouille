@@ -1,19 +1,23 @@
-"""Business repository error definitions."""
+"""Exceptions métier communes aux repositories persistants.
+
+Elles permettent aux couches supérieures de traiter un échec connu sans
+dépendre des exceptions techniques propres à SQLite.
+"""
 
 from __future__ import annotations
 
 
 class RepositoryError(RuntimeError):
-    """Raised when persisted business data cannot be handled safely."""
+    """Signaler qu'une donnée persistée ne peut pas être manipulée sûrement."""
 
 
 class TaskNotFoundError(RepositoryError):
-    """Raised when a requested task does not exist."""
+    """Signaler que la tâche demandée n'existe pas."""
 
 
 class TaskAlreadyCompletedError(RepositoryError):
-    """Raised when a completed task is completed again."""
+    """Signaler une nouvelle complétion d'une tâche déjà terminée."""
 
 
 class MemoryNotFoundError(RepositoryError):
-    """Raised when a requested memory does not exist."""
+    """Signaler que le souvenir demandé n'existe pas."""

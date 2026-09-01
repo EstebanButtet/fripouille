@@ -1,4 +1,10 @@
-"""Structured assistant intent definitions."""
+"""Définition et validation des intentions structurées de l'assistant.
+
+Une intention est la proposition normalisée qui relie l'interprétation du
+message à une action connue de l'application. La liste fermée des noms et des
+paramètres constitue une frontière de sécurité : Ollama ne peut pas inventer
+un nom d'action ou transmettre des champs arbitraires au registre.
+"""
 
 from __future__ import annotations
 
@@ -23,13 +29,18 @@ IntentName = Literal[
 
 @dataclass(frozen=True, slots=True)
 class IntentParameterSpecification:
-    """Define the authorized parameters for one intent."""
+    """Décrire les paramètres obligatoires et facultatifs d'une intention.
+
+    Les deux ensembles sont immuables et ne doivent pas se chevaucher. Cette
+    classe décrit le contrat ; la validation métier des valeurs appartient
+    ensuite à chaque action.
+    """
 
     required: frozenset[str] = field(default_factory=frozenset)
     optional: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
-        """Validate that the parameter contract is internally coherent."""
+        """Vérifier que le contrat de paramètres est cohérent et normalisé."""
         if not isinstance(self.required, frozenset):
             raise TypeError(
                 "Required intent parameters must be a frozenset."
@@ -147,13 +158,18 @@ ALLOWED_INTENT_NAMES: frozenset[str] = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class Intent:
-    """Represent a validated intent identified in a user request."""
+    """Représenter une intention validée issue d'une demande utilisateur.
+
+    ``name`` choisit un chemin autorisé. ``parameters`` ne contient que des
+    chaînes normalisées et devient un ``MappingProxyType`` en lecture seule :
+    une action ne peut donc pas recevoir un dictionnaire modifié après coup.
+    """
 
     name: IntentName
     parameters: Mapping[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        """Validate and normalize the intent fields."""
+        """Valider les champs et figer une copie normalisée des paramètres."""
         if not isinstance(self.name, str):
             raise TypeError("Intent name must be a string.")
 

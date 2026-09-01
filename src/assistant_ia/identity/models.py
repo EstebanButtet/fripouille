@@ -1,4 +1,10 @@
-"""Structured assistant identity domain models."""
+"""Modèle métier structuré de l'identité stable de l'assistant.
+
+``AssistantIdentity`` contient les repères déclaratifs qui donnent à
+Fripouille son nom, son rôle et son style. Ce modèle est immuable et n'est
+jamais mis à jour depuis une réponse du LLM. Il ne représente ni des souvenirs,
+ni une relation sociale évolutive, ni un apprentissage comportemental.
+"""
 
 from __future__ import annotations
 
@@ -37,7 +43,13 @@ ALLOWED_GRAMMATICAL_GENDERS: frozenset[str] = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class AssistantIdentity:
-    """Represent the stable identity of the assistant."""
+    """Représenter la configuration stable de Fripouille.
+
+    Les tuples décrivent des collections ordonnées de traits ou règles. Les
+    niveaux ``humor_level``, ``initiative_level`` et ``curiosity_level`` sont
+    des catégories de configuration, pas des mesures d'un état interne vivant.
+    ``grammatical_gender`` sert au rendu linguistique de l'assistant.
+    """
 
     name: str
     role: str
@@ -52,7 +64,7 @@ class AssistantIdentity:
     boundaries: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        """Validate and normalize the identity configuration."""
+        """Valider et normaliser chaque partie de la configuration immuable."""
         object.__setattr__(
             self,
             "name",
@@ -120,7 +132,7 @@ def _normalize_text(
     *,
     field_name: str,
 ) -> str:
-    """Validate and normalize one required identity text value."""
+    """Valider et normaliser un texte obligatoire de l'identité."""
     if not isinstance(value, str):
         raise TypeError(
             f"Assistant identity {field_name} must be a string."
@@ -139,7 +151,7 @@ def _normalize_text(
 def _normalize_grammatical_gender(
     value: object,
 ) -> GrammaticalGender:
-    """Validate and normalize the assistant grammatical gender."""
+    """Valider le genre grammatical contre la liste fermée."""
     if not isinstance(value, str):
         raise TypeError(
             "Assistant identity grammatical_gender must be a string."
@@ -161,7 +173,7 @@ def _normalize_text_tuple(
     *,
     field_name: str,
 ) -> tuple[str, ...]:
-    """Validate and normalize one immutable identity text collection."""
+    """Valider une collection non vide de textes d'identité."""
     if not isinstance(value, tuple):
         raise TypeError(
             f"Assistant identity {field_name} must be a tuple."
@@ -197,7 +209,7 @@ def _normalize_behavior_level(
     *,
     field_name: str,
 ) -> BehaviorLevel:
-    """Validate and normalize one categorical behavior level."""
+    """Valider un niveau comportemental appartenant aux catégories connues."""
     if not isinstance(value, str):
         raise TypeError(
             f"Assistant identity {field_name} must be a string."

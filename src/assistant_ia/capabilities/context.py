@@ -1,4 +1,10 @@
-"""Structured description of current assistant capabilities."""
+"""Description structurée des capacités actuelles de Fripouille.
+
+Le contexte est construit depuis le vrai ``ActionRegistry`` puis rendu dans le
+prompt. Il empêche Ollama de confondre une fonction future avec une fonction
+disponible, ou une action explicite de mémoire avec le rappel contextuel
+automatique.
+"""
 
 from __future__ import annotations
 
@@ -72,7 +78,13 @@ _ACTION_CAPABILITY_STATEMENTS = {
 
 @dataclass(frozen=True, slots=True)
 class CapabilityContext:
-    """Describe capabilities that are actually available now."""
+    """Décrire uniquement les capacités disponibles dans cet assemblage.
+
+    ``available_actions`` vient du registre réel. Les booléens distinguent des
+    familles non équivalentes : rappel mémoire passif, entrée visuelle, entrée
+    audio et contrôle robotique. Ils restent faux tant que ces mécanismes ne
+    sont pas effectivement câblés.
+    """
 
     available_actions: tuple[str, ...]
     automatic_memory_retrieval: bool = False
@@ -81,6 +93,7 @@ class CapabilityContext:
     robot_control: bool = False
 
     def __post_init__(self) -> None:
+        """Valider, dédupliquer et ordonner les noms d'action disponibles."""
         if not isinstance(self.available_actions, tuple):
             raise TypeError(
                 "Available actions must be provided as a tuple."
@@ -121,7 +134,11 @@ def build_capability_context(
     *,
     automatic_memory_retrieval: bool = False,
 ) -> CapabilityContext:
-    """Build capabilities from the real executable action registry."""
+    """Construire les capacités depuis le registre d'actions réel.
+
+    Le modèle n'annonce ainsi que ce que l'application peut réellement router,
+    indépendamment des intentions connues par le schéma global.
+    """
     if not isinstance(action_registry, ActionRegistry):
         raise TypeError(
             "Capability context requires an ActionRegistry."
@@ -143,7 +160,12 @@ def build_capability_context(
 def render_capability_context(
     context: CapabilityContext,
 ) -> str:
-    """Render current capabilities as compact model context."""
+    """Rendre les capacités actuelles sous forme de contexte compact.
+
+    Cette fonction produit du texte de prompt, sans activer une capacité. Les
+    actions inconnues gardent leur nom mais ne reçoivent pas de description
+    inventée.
+    """
     if not isinstance(context, CapabilityContext):
         raise TypeError(
             "Capability rendering requires a CapabilityContext."

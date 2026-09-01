@@ -1,4 +1,8 @@
-"""Default person configuration."""
+"""Personne supposée présente par défaut au début d'une session.
+
+Cette valeur locale n'est pas un profil relationnel appris ; elle sert
+seulement à initialiser :class:`ActivePersonContext`.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +13,7 @@ DEFAULT_PERSON_NAME = "Este"
 
 
 def build_default_person() -> PersonProfile:
-    """Build the person assumed to be using the assistant by default."""
+    """Construire la personne supposée utiliser l'assistant par défaut."""
     return PersonProfile(
         name=DEFAULT_PERSON_NAME,
     )

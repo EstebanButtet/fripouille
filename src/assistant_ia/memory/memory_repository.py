@@ -1,4 +1,10 @@
-"""SQLite repository for persistent assistant memories."""
+"""Repository SQLite des souvenirs persistants de Fripouille.
+
+Un repository traduit les opérations métier (« enregistrer », « chercher »,
+« corriger », « supprimer ») en SQL paramétré, puis reconstruit des modèles
+:class:`Memory` validés. Il est la seule couche de ce domaine autorisée à
+connaître les lignes SQLite ; le coeur et la promotion manipulent des objets.
+"""
 
 from __future__ import annotations
 
@@ -36,14 +42,19 @@ _MEMORY_SELECT_COLUMNS = """
 
 
 class MemoryRepository:
-    """Save, search, update and delete memories stored in SQLite."""
+    """Enregistrer, rechercher, corriger et supprimer des souvenirs SQLite.
+
+    L'horloge injectable rend les dates déterministes dans les tests. Chaque
+    méthode ouvre sa transaction par ``SQLiteDatabase.connect`` et retourne le
+    modèle relu depuis la base, pas seulement les valeurs demandées.
+    """
 
     def __init__(
         self,
         database: SQLiteDatabase,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        """Create a memory repository with injectable persistence and time."""
+        """Créer le repository avec une base et une horloge injectables."""
         if not isinstance(database, SQLiteDatabase):
             raise TypeError(
                 "Memory repository database must be a SQLiteDatabase."
@@ -58,7 +69,11 @@ class MemoryRepository:
         self._clock = clock if clock is not None else _utc_now
 
     def save_memory(self, content: str) -> Memory:
-        """Persist and return one assistant memory."""
+        """Persister un souvenir demandé explicitement et le retourner.
+
+        Cette voie marque la provenance ``explicit_user`` avec une confiance
+        de mécanisme égale à 1 ; elle est distincte de l'analyse automatique.
+        """
         normalized_content = _normalize_required_text(
             content,
             field_name="Memory content",
@@ -72,6 +87,8 @@ class MemoryRepository:
         confidence = 1.0
         updated_at = created_at
 
+        # L'insertion et la relecture appartiennent à la même transaction : le
+        # modèle retourné correspond exactement à la ligne créée.
         with self._database.connect() as connection:
             cursor = connection.execute(
                 """
@@ -117,7 +134,11 @@ class MemoryRepository:
         return _memory_from_row(memory_row)
 
     def save_candidate(self, candidate: MemoryCandidate) -> Memory:
-        """Persist one explicitly confirmed conversation candidate."""
+        """Persister un candidat conversationnel explicitement confirmé.
+
+        La preuve et la confiance calculées pendant l'analyse sont conservées
+        avec la provenance ``conversation_analysis``.
+        """
         if not isinstance(candidate, MemoryCandidate):
             raise TypeError(
                 "Candidate persistence requires a MemoryCandidate."
@@ -175,7 +196,12 @@ class MemoryRepository:
         memory_id: int,
         candidate: MemoryCandidate,
     ) -> Memory:
-        """Replace one memory from an explicitly confirmed candidate."""
+        """Remplacer le contenu d'un souvenir par un candidat confirmé.
+
+        L'identifiant et la date de création sont conservés. Si l'horloge ne
+        progresse pas, une microseconde est ajoutée pour garantir que
+        ``updated_at`` matérialise réellement la correction.
+        """
         normalized_memory_id = _validate_identifier(memory_id)
         if not isinstance(candidate, MemoryCandidate):
             raise TypeError(
@@ -251,7 +277,11 @@ class MemoryRepository:
         query: str,
         limit: int = DEFAULT_MEMORY_RESULT_LIMIT,
     ) -> tuple[Memory, ...]:
-        """Return memories containing one literal text query."""
+        """Chercher littéralement un texte dans les souvenirs.
+
+        Les caractères joker de ``LIKE`` sont échappés : ``%`` et ``_`` saisis
+        par l'utilisateur restent des caractères à chercher, pas du SQL.
+        """
         normalized_query = _normalize_required_text(
             query,
             field_name="Memory search query",
@@ -284,7 +314,7 @@ class MemoryRepository:
         self,
         limit: int = DEFAULT_MEMORY_LIST_LIMIT,
     ) -> tuple[Memory, ...]:
-        """Return a bounded recent memory set for local processing."""
+        """Retourner une vue récente bornée destinée aux traitements locaux."""
         normalized_limit = _validate_list_limit(limit)
 
         with self._database.connect() as connection:
@@ -303,7 +333,11 @@ class MemoryRepository:
         )
 
     def delete_memory(self, memory_id: int) -> Memory:
-        """Delete exactly one memory selected by its identifier."""
+        """Supprimer exactement un souvenir identifié et retourner son état.
+
+        La ligne est lue avant suppression dans la même transaction, ce qui
+        permet à l'action de décrire ce qui a réellement été retiré.
+        """
         normalized_memory_id = _validate_identifier(memory_id)
 
         with self._database.connect() as connection:
@@ -341,7 +375,7 @@ class MemoryRepository:
 def _memory_from_row(
     memory_row: tuple[object, ...] | None,
 ) -> Memory:
-    """Convert one validated SQLite row into a memory model."""
+    """Convertir une ligne SQLite complète en modèle ``Memory`` validé."""
     if memory_row is None or len(memory_row) != 7:
         raise RepositoryError(
             "Stored memory data is incomplete."
@@ -384,7 +418,7 @@ def _normalize_required_text(
     *,
     field_name: str,
 ) -> str:
-    """Return normalized non-empty text."""
+    """Retourner un texte non vide après normalisation extérieure."""
     if not isinstance(value, str):
         raise TypeError(
             f"{field_name} must be a string."
@@ -401,7 +435,7 @@ def _normalize_required_text(
 
 
 def _validate_identifier(memory_id: int) -> int:
-    """Return a validated positive memory identifier."""
+    """Retourner un identifiant mémoire entier strictement positif."""
     if isinstance(memory_id, bool) or not isinstance(memory_id, int):
         raise TypeError(
             "Memory identifier must be an integer."
@@ -416,7 +450,7 @@ def _validate_identifier(memory_id: int) -> int:
 
 
 def _validate_result_limit(limit: int) -> int:
-    """Return a bounded positive memory result limit."""
+    """Valider une limite positive pour les résultats de recherche."""
     if isinstance(limit, bool) or not isinstance(limit, int):
         raise TypeError(
             "Memory result limit must be an integer."
@@ -431,7 +465,7 @@ def _validate_result_limit(limit: int) -> int:
 
 
 def _validate_list_limit(limit: int) -> int:
-    """Return a bounded positive memory listing limit."""
+    """Valider une limite positive pour la vue locale des souvenirs."""
     if isinstance(limit, bool) or not isinstance(limit, int):
         raise TypeError(
             "Memory list limit must be an integer."
@@ -446,7 +480,7 @@ def _validate_list_limit(limit: int) -> int:
 
 
 def _escape_like_literal(value: str) -> str:
-    """Escape SQLite LIKE wildcard characters for literal searching."""
+    """Échapper les jokers ``LIKE`` afin d'effectuer une recherche littérale."""
     return (
         value
         .replace("!", "!!")
@@ -460,7 +494,7 @@ def _normalize_datetime(
     *,
     field_name: str,
 ) -> datetime:
-    """Return a timezone-aware datetime normalized to UTC."""
+    """Retourner une date-heure avec fuseau normalisée en UTC."""
     if not isinstance(value, datetime):
         raise TypeError(
             f"{field_name} must be a datetime."
@@ -475,7 +509,7 @@ def _normalize_datetime(
 
 
 def _serialize_datetime(value: datetime) -> str:
-    """Serialize one normalized datetime as ISO 8601."""
+    """Sérialiser une date-heure normalisée au format ISO 8601."""
     return value.astimezone(timezone.utc).isoformat()
 
 
@@ -484,7 +518,7 @@ def _parse_datetime(
     *,
     field_name: str,
 ) -> datetime:
-    """Parse one persisted ISO 8601 datetime."""
+    """Reconstruire une date-heure persistée au format ISO 8601."""
     if not isinstance(value, str):
         raise TypeError(
             f"{field_name} must be stored as text."
@@ -499,5 +533,5 @@ def _parse_datetime(
 
 
 def _utc_now() -> datetime:
-    """Return the current timezone-aware UTC time."""
+    """Retourner l'instant courant en UTC avec information de fuseau."""
     return datetime.now(timezone.utc)

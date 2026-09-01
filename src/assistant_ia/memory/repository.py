@@ -1,4 +1,14 @@
-"""SQLite persistence infrastructure."""
+"""Infrastructure SQLite partagée par les repositories métier.
+
+``SQLiteDatabase`` possède le chemin, ouvre des connexions transactionnelles,
+active les clés étrangères et gère les migrations de schéma. Les repositories
+de tâches, mémoire et journal utilisent cette infrastructure mais gardent leur
+SQL métier dans leurs propres modules.
+
+Une transaction couvre chaque bloc ``with database.connect()`` : une sortie
+normale valide les écritures, tandis qu'une exception provoque leur annulation
+par le gestionnaire de contexte SQLite avant fermeture.
+"""
 
 from __future__ import annotations
 
@@ -48,11 +58,15 @@ _BUSINESS_TABLE_COLUMNS = {
 
 
 class DatabaseError(RuntimeError):
-    """Raised when the SQLite persistence layer cannot complete an operation."""
+    """Traduire un échec technique SQLite en erreur stable de persistance."""
 
 
 def default_database_path() -> Path:
-    """Return the default user-local SQLite database path."""
+    """Construire le chemin SQLite local propre à l'utilisateur Windows.
+
+    La variable ``LOCALAPPDATA`` choisit l'emplacement ; le dossier n'est créé
+    qu'à l'ouverture d'une connexion.
+    """
     local_app_data = os.environ.get("LOCALAPPDATA")
 
     if local_app_data is None or not local_app_data.strip():
@@ -66,20 +80,29 @@ def default_database_path() -> Path:
 
 
 class SQLiteDatabase:
-    """Represent and manage a SQLite database stored at a local path."""
+    """Gérer le chemin, les connexions et le schéma d'une base SQLite locale.
+
+    L'objet est léger et peut être partagé par plusieurs repositories. Il ne
+    garde pas une connexion ouverte entre les opérations.
+    """
 
     def __init__(self, database_path: str | PathLike[str]) -> None:
-        """Create a database manager with a normalized path."""
+        """Créer le gestionnaire après normalisation du chemin de fichier."""
         self._path = _normalize_database_path(database_path)
 
     @property
     def path(self) -> Path:
-        """Return the normalized absolute database path."""
+        """Retourner le chemin absolu normalisé de la base."""
         return self._path
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        """Open a configured transactional connection and close it afterward."""
+        """Ouvrir une connexion transactionnelle configurée puis la fermer.
+
+        La valeur produite par ``yield`` est disponible dans le bloc ``with``.
+        Les erreurs SQLite sont enveloppées dans ``DatabaseError`` et la
+        fermeture est garantie par ``finally``, même en cas d'exception.
+        """
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
         except OSError as error:
@@ -105,6 +128,8 @@ class SQLiteDatabase:
                     "SQLite foreign key enforcement could not be enabled."
                 )
 
+            # Le gestionnaire de contexte natif valide ou annule la transaction
+            # sans transférer cette responsabilité aux repositories appelants.
             with connection:
                 yield connection
         except sqlite3.Error as error:
@@ -116,7 +141,12 @@ class SQLiteDatabase:
                 connection.close()
 
     def initialize(self) -> None:
-        """Create, migrate and validate the current database schema."""
+        """Créer, migrer puis valider le schéma dans une même transaction.
+
+        Les migrations sont appliquées une par une selon la version enregistrée.
+        Une base plus récente que le code ou une structure inattendue est
+        refusée afin d'éviter une utilisation partielle des données.
+        """
         with self.connect() as connection:
             connection.execute("BEGIN")
 
@@ -128,6 +158,8 @@ class SQLiteDatabase:
                     "Unsupported database schema version."
                 )
 
+            # Chaque migration ne modifie la version qu'après avoir réussi.
+            # Toute exception annule donc aussi bien le SQL que le compteur.
             while schema_version < CURRENT_SCHEMA_VERSION:
                 migration = _SCHEMA_MIGRATIONS.get(schema_version)
 
@@ -166,7 +198,7 @@ class SQLiteDatabase:
 def _create_technical_schema(
     connection: sqlite3.Connection,
 ) -> None:
-    """Create and validate the technical schema metadata."""
+    """Créer puis valider la table technique de version du schéma."""
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS schema_version (
@@ -197,7 +229,7 @@ def _create_technical_schema(
 def _read_schema_version(
     connection: sqlite3.Connection,
 ) -> int:
-    """Return the single validated schema version."""
+    """Lire l'unique ligne de version après validation de sa forme."""
     version_rows = connection.execute(
         """
         SELECT id, version
@@ -228,7 +260,7 @@ def _read_schema_version(
 def _migrate_schema_1_to_2(
     connection: sqlite3.Connection,
 ) -> None:
-    """Add the initial task, memory and journal business tables."""
+    """Ajouter les premières tables métier de tâches, mémoire et journal."""
     connection.execute(
         """
         CREATE TABLE tasks (
@@ -284,7 +316,12 @@ def _migrate_schema_1_to_2(
 def _migrate_schema_2_to_3(
     connection: sqlite3.Connection,
 ) -> None:
-    """Add inspectable provenance to every persistent memory."""
+    """Ajouter une provenance inspectable à chaque souvenir existant.
+
+    SQLite ne permettant pas ici toutes les contraintes via de simples ajouts
+    de colonnes, la table est reconstruite. Un comptage avant/après garantit
+    que la migration n'a perdu aucune ligne.
+    """
     source_count_row = connection.execute(
         "SELECT COUNT(*) FROM memories"
     ).fetchone()
@@ -364,7 +401,7 @@ def _migrate_schema_2_to_3(
 def _validate_current_business_schema(
     connection: sqlite3.Connection,
 ) -> None:
-    """Validate the required business table structures."""
+    """Comparer les structures des tables métier à la forme attendue."""
     for table_name, expected_columns in _BUSINESS_TABLE_COLUMNS.items():
         if _table_columns(connection, table_name) != expected_columns:
             raise DatabaseError(
@@ -376,7 +413,7 @@ def _table_columns(
     connection: sqlite3.Connection,
     table_name: str,
 ) -> tuple[tuple[str, str, int, int], ...]:
-    """Return the normalized column structure of an internal table."""
+    """Retourner la structure normalisée des colonnes d'une table interne."""
     column_rows = connection.execute(
         """
         SELECT
@@ -415,7 +452,7 @@ _SCHEMA_MIGRATIONS = {
 def _normalize_database_path(
     database_path: str | PathLike[str],
 ) -> Path:
-    """Validate and normalize a SQLite database path."""
+    """Valider puis résoudre un chemin destiné à un fichier SQLite."""
     try:
         raw_path = os.fspath(database_path)
     except TypeError as error:

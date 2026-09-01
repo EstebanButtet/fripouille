@@ -1,4 +1,11 @@
-"""Controlled Windows application launching."""
+"""Lancement contrôlé d'applications Windows explicitement autorisées.
+
+Le catalogue associe des noms logiques et alias à des commandes internes
+immuables. Une demande utilisateur ne fournit jamais un exécutable ou des
+arguments libres : elle sélectionne exactement une entrée de cette liste.
+Le lancement utilise ``subprocess`` sans shell, après les contrôles de
+permission et de confirmation effectués par :mod:`assistant_ia.actions`.
+"""
 
 from __future__ import annotations
 
@@ -26,20 +33,25 @@ _BLOCKED_EXECUTABLE_NAMES: frozenset[str] = frozenset(
 
 
 class WindowsApplicationError(RuntimeError):
-    """Base error raised by controlled Windows application access."""
+    """Base des erreurs d'accès contrôlé aux applications Windows."""
 
 
 class WindowsApplicationNotAllowedError(WindowsApplicationError):
-    """Raised when an application is absent from the explicit allowlist."""
+    """Signaler qu'une application est absente de la liste blanche."""
 
 
 class WindowsApplicationLaunchError(WindowsApplicationError):
-    """Raised when Windows cannot launch an allowed application."""
+    """Signaler que Windows n'a pas pu lancer une application autorisée."""
 
 
 @dataclass(frozen=True, slots=True)
 class WindowsApplication:
-    """Describe one explicitly allowed Windows application."""
+    """Décrire une application explicitement autorisée.
+
+    ``name`` et ``aliases`` servent à la résolution exacte ; ``display_name``
+    sert à la confirmation ; ``command`` est construit par le code et non par
+    le modèle. Les shells et moteurs de scripts sensibles sont interdits.
+    """
 
     name: str
     display_name: str
@@ -47,7 +59,7 @@ class WindowsApplication:
     aliases: frozenset[str] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
-        """Validate and normalize one allowlisted application."""
+        """Valider, normaliser et figer une entrée de liste blanche."""
         if not isinstance(self.name, str):
             raise TypeError(
                 "Windows application name must be a string."
@@ -180,7 +192,11 @@ class WindowsApplication:
 def build_default_windows_applications(
     local_app_data: str | PathLike[str] | None = None,
 ) -> tuple[WindowsApplication, ...]:
-    """Build the trusted Windows application catalogue."""
+    """Construire le catalogue de confiance des applications Windows.
+
+    Les chemins sont des constantes applicatives. L'emplacement local facultatif
+    sert uniquement à construire l'entrée Discord connue.
+    """
     applications = [
         WindowsApplication(
             name="notepad",
@@ -312,14 +328,19 @@ def build_default_windows_applications(
 
 
 class WindowsApplicationLauncher:
-    """Resolve and launch applications from an explicit Windows allowlist."""
+    """Résoudre puis lancer une cible de la liste blanche Windows.
+
+    L'index des alias est préparé à la construction et refuse toute ambiguïté.
+    Le lanceur de processus est injectable pour tester sans démarrer réellement
+    une application.
+    """
 
     def __init__(
         self,
         applications: Iterable[WindowsApplication] | None = None,
         process_launcher: ProcessLauncher | None = None,
     ) -> None:
-        """Create a launcher with injectable process execution."""
+        """Créer le lanceur et son index d'identifiants uniques."""
         resolved_applications = (
             tuple(applications)
             if applications is not None
@@ -375,14 +396,14 @@ class WindowsApplicationLauncher:
     def applications(
         self,
     ) -> tuple[WindowsApplication, ...]:
-        """Return the immutable configured application definitions."""
+        """Retourner les définitions immuables du catalogue configuré."""
         return self._applications
 
     def resolve_application(
         self,
         application_name: str,
     ) -> WindowsApplication:
-        """Resolve one exact logical name or alias from the allowlist."""
+        """Résoudre exactement un nom logique ou un alias de la liste blanche."""
         if not isinstance(application_name, str):
             raise TypeError(
                 "Windows application lookup must be a string."
@@ -410,7 +431,7 @@ class WindowsApplicationLauncher:
         self,
         application_name: str,
     ) -> WindowsApplication:
-        """Launch one allowlisted application without using a shell."""
+        """Lancer une application autorisée sans passer par un shell."""
         application = self.resolve_application(
             application_name
         )
@@ -430,7 +451,7 @@ class WindowsApplicationLauncher:
 def _launch_process(
     command: tuple[str, ...],
 ) -> object:
-    """Launch one internally constructed command without a shell."""
+    """Lancer la commande interne sous forme d'arguments, sans shell."""
     return subprocess.Popen(
         command,
         shell=False,

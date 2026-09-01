@@ -1,4 +1,11 @@
-"""Interactive terminal interface for the personal AI assistant."""
+"""Interface terminal interactive et historique de Fripouille.
+
+Ce module affiche l'invite, traite trois commandes locales et transmet les
+autres messages à un unique :class:`AssistantRuntime`. Il fournit aussi le
+handler interactif de confirmation utilisé par les actions sensibles.
+Les erreurs connues de base et de modèle sont transformées en messages utiles
+sans exposer une trace technique dans la conversation.
+"""
 
 from __future__ import annotations
 
@@ -30,7 +37,7 @@ DATABASE_ERROR_MESSAGE = (
 
 
 def display_welcome() -> None:
-    """Display the application title and initial instructions."""
+    """Afficher le titre de l'application et l'instruction initiale."""
     print()
     print(f"=== {APP_TITLE} ===")
     print("Interface terminal locale — modèle d'IA local via Ollama.")
@@ -39,7 +46,7 @@ def display_welcome() -> None:
 
 
 def display_help() -> None:
-    """Display the commands supported by the terminal interface."""
+    """Afficher les commandes gérées localement par le terminal."""
     print()
     print("Commandes disponibles :")
     print(f"  {COMMAND_HELP:<8} Afficher cette aide")
@@ -49,14 +56,18 @@ def display_help() -> None:
 
 
 def display_assistant_message(message: str) -> None:
-    """Display a message produced by the assistant."""
+    """Afficher un texte final déjà produit par le runtime."""
     print(f"{ASSISTANT_PREFIX}{message}")
 
 
 def request_terminal_confirmation(
     request: ConfirmationRequest,
 ) -> bool:
-    """Request explicit confirmation from the terminal user."""
+    """Demander une confirmation explicite à la personne dans le terminal.
+
+    Seuls ``o`` et ``oui`` autorisent l'action ; Entrée et toute autre réponse
+    refusent. Ce défaut fermé empêche une validation accidentelle.
+    """
     if not isinstance(request, ConfirmationRequest):
         raise TypeError(
             "Terminal confirmation requires a ConfirmationRequest."
@@ -73,7 +84,12 @@ def request_terminal_confirmation(
 
 
 def run_terminal(*, debug: bool = False) -> None:
-    """Start and manage the interactive terminal session."""
+    """Construire le runtime puis gérer la boucle interactive.
+
+    Une seule instance est conservée pendant la boucle, ce qui préserve le
+    contexte conversationnel. ``/reset`` réinitialise cet état temporaire sans
+    effacer les données SQLite ; ``/quit`` ne passe jamais par Ollama.
+    """
     display_welcome()
 
     try:
@@ -92,6 +108,8 @@ def run_terminal(*, debug: bool = False) -> None:
         )
         return
 
+    # Les commandes d'interface sont résolues avant ``process_message`` : elles
+    # restent du contrôle terminal et ne peuvent devenir des intentions LLM.
     while True:
         try:
             user_message = input(USER_PROMPT).strip()

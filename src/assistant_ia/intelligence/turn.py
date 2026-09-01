@@ -1,4 +1,9 @@
-"""Preparation of one conversational turn from ordered messages."""
+"""Préparation d'un tour à partir de messages conversationnels ordonnés.
+
+Le dernier message utilisateur est séparé de l'historique, puis l'historique
+est borné sans couper le contenu d'un message. Le client Ollama reçoit ainsi
+un contexte récent et maîtrisé, distinct de la demande actuelle.
+"""
 
 from __future__ import annotations
 
@@ -6,15 +11,19 @@ from dataclasses import dataclass
 
 from assistant_ia.core.context import ConversationMessage
 
-# Initial empirical limits: keep them centralized so real usage can be
-# measured before any future adjustment.
+# Limites empiriques initiales, centralisées afin que leur impact puisse être
+# mesuré avant un éventuel ajustement futur.
 MAX_PROJECTED_HISTORY_MESSAGES = 8
 MAX_PROJECTED_HISTORY_CHARACTERS = 3000
 
 
 @dataclass(frozen=True, slots=True)
 class ConversationTurn:
-    """Separate previous conversation history from the current user message."""
+    """Séparer l'historique projeté du message utilisateur courant.
+
+    Cette dataclass immuable évite de confondre un ancien message avec la
+    demande qui doit être interprétée pendant le tour présent.
+    """
 
     history: tuple[ConversationMessage, ...]
     current_user_message: ConversationMessage
@@ -23,7 +32,11 @@ class ConversationTurn:
 def build_conversation_turn(
     messages: tuple[ConversationMessage, ...],
 ) -> ConversationTurn:
-    """Build one turn from an ordered conversation ending with the user."""
+    """Construire un tour depuis une séquence terminée par l'utilisateur.
+
+    Lève ``TypeError`` si l'entrée n'est pas un tuple et ``ValueError`` si
+    elle est vide ou ne se termine pas par un message utilisateur.
+    """
     if not isinstance(messages, tuple):
         raise TypeError(
             "Conversation messages must be provided as a tuple."
@@ -41,6 +54,8 @@ def build_conversation_turn(
             "The latest conversation message must be from the user."
         )
 
+    # Le dernier message reste entier et hors de la projection : les limites
+    # ne s'appliquent qu'au contexte historique qui le précède.
     return ConversationTurn(
         history=project_conversation_history(
             messages[:-1]
@@ -52,7 +67,12 @@ def build_conversation_turn(
 def project_conversation_history(
     history: tuple[ConversationMessage, ...],
 ) -> tuple[ConversationMessage, ...]:
-    """Return a recent bounded suffix without truncating messages."""
+    """Retourner le suffixe récent respectant les deux limites globales.
+
+    Les échanges utilisateur/assistant sont sélectionnés comme groupes pour
+    ne pas conserver une réponse sans la question qui lui donnait son sens.
+    Aucun message individuel n'est tronqué.
+    """
     if not isinstance(history, tuple):
         raise TypeError(
             "Conversation history must be provided as a tuple."
@@ -63,6 +83,8 @@ def project_conversation_history(
     selected_message_count = 0
     selected_character_count = 0
 
+    # On part du groupe le plus récent et on s'arrête au premier groupe qui
+    # dépasserait le budget : le résultat reste donc un suffixe chronologique.
     for group in reversed(groups):
         group_message_count = len(group)
         group_character_count = sum(
@@ -92,7 +114,11 @@ def project_conversation_history(
 def _group_conversation_history(
     history: tuple[ConversationMessage, ...],
 ) -> tuple[tuple[ConversationMessage, ...], ...]:
-    """Group normal user/assistant exchanges while tolerating odd history."""
+    """Regrouper les paires normales tout en tolérant un historique atypique.
+
+    Un message isolé devient son propre groupe. Cette tolérance simplifie les
+    tests et évite que la projection ne répare silencieusement l'historique.
+    """
     groups: list[tuple[ConversationMessage, ...]] = []
     index = 0
 

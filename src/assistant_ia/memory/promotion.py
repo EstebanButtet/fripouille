@@ -1,4 +1,11 @@
-"""Controlled application-owned promotion of memory candidates."""
+"""Promotion contrôlée des candidats mémoire par l'application.
+
+Ce service compare un :class:`MemoryCandidate` non persistant aux souvenirs
+existants et propose une opération bornée : création, déjà connu, doublon
+possible, correction ou conflit. Il ne demande pas lui-même le consentement ;
+``AssistantCore`` présente la proposition et rappelle ensuite
+:meth:`MemoryPromotionService.apply_confirmed` après un oui explicite.
+"""
 
 from __future__ import annotations
 
@@ -83,13 +90,19 @@ _IGNORED_COMPARISON_TERMS = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class MemoryPromotionProposal:
-    """Describe one bounded persistence operation chosen by the application."""
+    """Décrire une opération de persistance choisie par l'application.
+
+    ``candidate`` reste la nouvelle information proposée. ``related_memory``
+    désigne le souvenir existant concerné pour toutes les opérations sauf une
+    création. L'objet décrit une possibilité ; sa construction n'écrit rien.
+    """
 
     operation: MemoryPromotionOperation
     candidate: MemoryCandidate
     related_memory: Memory | None = None
 
     def __post_init__(self) -> None:
+        """Valider l'opération et la présence cohérente du souvenir lié."""
         if not isinstance(self.operation, str):
             raise TypeError("Memory promotion operation must be a string.")
 
@@ -124,14 +137,20 @@ class MemoryPromotionProposal:
 
     @property
     def requires_confirmation(self) -> bool:
-        """Return whether the proposal may mutate persistence after consent."""
+        """Indiquer si un consentement peut conduire à modifier SQLite."""
         return self.operation != "already_known"
 
 
 class MemoryPromotionService:
-    """Compare, propose and apply explicitly confirmed memory changes."""
+    """Comparer, proposer puis appliquer les changements mémoire confirmés.
+
+    Le repository est la seule dépendance de persistance. La comparaison est
+    locale et déterministe ; le service ne consulte pas Ollama et ne présente
+    aucun texte à l'utilisateur.
+    """
 
     def __init__(self, repository: MemoryRepository) -> None:
+        """Créer le service au-dessus du repository mémoire autorisé."""
         if not isinstance(repository, MemoryRepository):
             raise TypeError(
                 "Memory promotion requires a MemoryRepository."
@@ -142,7 +161,12 @@ class MemoryPromotionService:
         self,
         candidate: MemoryCandidate,
     ) -> MemoryPromotionProposal:
-        """Classify one validated candidate without writing persistence."""
+        """Classer un candidat validé sans effectuer d'écriture.
+
+        L'égalité normalisée est cherchée d'abord, puis une correction
+        explicite, un quasi-doublon et enfin un possible conflit lexical. Une
+        création n'est proposée qu'en absence de relation détectée.
+        """
         if not isinstance(candidate, MemoryCandidate):
             raise TypeError(
                 "Memory promotion requires a validated MemoryCandidate."
@@ -165,6 +189,8 @@ class MemoryPromotionService:
                     related_memory=memory,
                 )
 
+        # Ce classement est inspectable et stable : similarité d'abord, puis
+        # récence et identifiant pour départager deux souvenirs.
         ranked_memories = sorted(
             memories,
             key=lambda memory: (
@@ -219,7 +245,12 @@ class MemoryPromotionService:
         self,
         proposal: MemoryPromotionProposal,
     ) -> Memory:
-        """Apply only a still-current proposal after external confirmation."""
+        """Appliquer une proposition encore actuelle après confirmation.
+
+        La proposition est recalculée avant l'écriture pour éviter d'appliquer
+        une décision devenue obsolète entre la question et la réponse. Une
+        divergence lève ``ValueError`` au lieu de modifier le mauvais souvenir.
+        """
         if not isinstance(proposal, MemoryPromotionProposal):
             raise TypeError(
                 "Confirmed promotion requires a MemoryPromotionProposal."
@@ -229,6 +260,8 @@ class MemoryPromotionService:
                 raise ValueError("Known memory proposal is incomplete.")
             return proposal.related_memory
 
+        # Contrôle optimiste : l'état de la base a pu changer pendant que
+        # l'utilisateur répondait à la demande de confirmation.
         current_proposal = self.propose(proposal.candidate)
 
         if current_proposal.operation == "already_known":
@@ -256,7 +289,7 @@ class MemoryPromotionService:
 
 
 def normalize_memory_equivalence(value: str) -> str:
-    """Normalize Unicode, case, spacing and cosmetic punctuation."""
+    """Normaliser Unicode, casse, espaces et ponctuation cosmétique."""
     if not isinstance(value, str):
         raise TypeError("Memory comparison text must be a string.")
     normalized = "".join(
@@ -268,6 +301,7 @@ def normalize_memory_equivalence(value: str) -> str:
 
 
 def _comparison_terms(value: str) -> frozenset[str]:
+    """Extraire les termes significatifs utilisés pour les comparaisons."""
     return frozenset(
         term
         for term in normalize_memory_equivalence(value).split()
@@ -276,6 +310,7 @@ def _comparison_terms(value: str) -> frozenset[str]:
 
 
 def _lexical_similarity(left: str, right: str) -> float:
+    """Calculer la similarité de Jaccard entre deux ensembles de termes."""
     left_terms = _comparison_terms(left)
     right_terms = _comparison_terms(right)
     union = left_terms | right_terms
@@ -285,11 +320,13 @@ def _lexical_similarity(left: str, right: str) -> float:
 
 
 def _is_explicit_correction(source_text: str) -> bool:
+    """Détecter un marqueur explicite de correction dans la preuve source."""
     normalized = normalize_memory_equivalence(source_text)
     return any(marker in normalized for marker in _CORRECTION_MARKERS)
 
 
 def _has_shared_relation_anchor(left: str, right: str) -> bool:
+    """Détecter un thème relationnel commun pouvant signaler un conflit."""
     left_terms = _comparison_terms(left)
     right_terms = _comparison_terms(right)
     shared_terms = left_terms & right_terms
@@ -304,6 +341,7 @@ def _first_related_memory(
     candidate_content: str,
     memories: list[Memory],
 ) -> Memory | None:
+    """Retourner le premier souvenir classé partageant une ancre relationnelle."""
     candidate_terms = _comparison_terms(candidate_content)
     for memory in memories:
         memory_terms = _comparison_terms(memory.content)

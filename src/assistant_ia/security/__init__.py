@@ -1,1 +1,1 @@
-"""Security and permission components."""
+"""Politiques de permission et frontière de confirmation utilisateur."""

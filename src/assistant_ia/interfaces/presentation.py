@@ -1,4 +1,10 @@
-"""User-facing presentation of internal assistant turn results."""
+"""Présentation utilisateur des résultats internes d'un tour.
+
+Les actions et la promotion mémoire produisent des textes techniquement précis,
+avec parfois des identifiants SQLite. Cette couche transforme ces résultats en
+formulations naturelles pour les interfaces, sans changer l'intention, le
+consentement requis ni l'opération déjà résolue par le coeur.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +23,12 @@ def build_user_facing_response(
     memory_proposal: MemoryPromotionProposal | None,
     awaiting_memory_confirmation: bool,
 ) -> str:
-    '''Hide persistence mechanics while preserving the resolved outcome.'''
+    '''Masquer la plomberie de persistance tout en conservant le résultat.
+
+    ``raw_response`` vient du coeur. Les autres paramètres permettent de
+    distinguer une action explicite, une proposition automatique et la réponse
+    à une confirmation, sans réinterpréter le texte avec un modèle.
+    '''
     if not isinstance(raw_response, str):
         raise TypeError('Presented assistant response must be a string.')
 
@@ -50,6 +61,7 @@ def build_user_facing_response(
 def _present_memory_proposal(
     proposal: MemoryPromotionProposal,
 ) -> str:
+    """Formuler naturellement une proposition mémoire déjà classée."""
     candidate_content = proposal.candidate.content
 
     if proposal.operation == 'already_known':
@@ -74,6 +86,7 @@ def _present_memory_proposal(
 
 
 def _present_memory_confirmation(raw_response: str) -> str:
+    """Présenter le résultat d'un consentement sans identifiant technique."""
     if raw_response.startswith(
         ('Souvenir enregistré :', 'Souvenir corrigé :')
     ):
@@ -82,6 +95,7 @@ def _present_memory_confirmation(raw_response: str) -> str:
 
 
 def _remove_persistent_identifiers(response: str) -> str:
+    """Retirer uniquement les marqueurs d'identifiant SQLite des lignes."""
     return '\n'.join(
         _PERSISTENT_IDENTIFIER.sub(' ', line).rstrip()
         for line in response.splitlines()

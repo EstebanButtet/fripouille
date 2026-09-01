@@ -1,4 +1,10 @@
-"""Persistent business models for tasks, memories and journal entries."""
+"""Modèles métier persistants des tâches, souvenirs et entrées de journal.
+
+Ces dataclasses immuables représentent les lignes SQLite après validation.
+Elles centralisent les invariants afin qu'un repository ne puisse pas remettre
+au reste de l'application une donnée incomplète ou incohérente. Elles ne
+lisent et n'écrivent jamais la base elles-mêmes.
+"""
 
 from __future__ import annotations
 
@@ -36,7 +42,12 @@ ALLOWED_MEMORY_SOURCES: frozenset[str] = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class Task:
-    """Represent one persisted assistant task."""
+    """Représenter une tâche persistée et son cycle de vie.
+
+    ``due_at`` est une échéance facultative. ``created_at`` ne change jamais ;
+    ``completed_at`` doit être présent exactement lorsque ``status`` vaut
+    ``completed``. Toutes les dates-heures sont normalisées en UTC.
+    """
 
     id: int
     title: str
@@ -46,7 +57,7 @@ class Task:
     completed_at: datetime | None
 
     def __post_init__(self) -> None:
-        """Validate and normalize persisted task data."""
+        """Valider, normaliser et figer les données persistées de la tâche."""
         normalized_id = _validate_identifier(self.id)
         normalized_title = _normalize_required_text(
             self.title,
@@ -104,7 +115,13 @@ class Task:
 
 @dataclass(frozen=True, slots=True)
 class Memory:
-    """Represent one persisted assistant memory."""
+    """Représenter un souvenir durable avec sa provenance inspectable.
+
+    ``source`` indique le mécanisme d'enregistrement ; ``source_text`` conserve
+    éventuellement la preuve utilisateur exacte. ``confidence`` mesure la
+    confiance dans l'extraction/enregistrement, pas la vérité du souvenir.
+    ``updated_at`` suit les corrections sans effacer ``created_at``.
+    """
 
     id: int
     content: str
@@ -115,7 +132,7 @@ class Memory:
     updated_at: datetime
 
     def __post_init__(self) -> None:
-        """Validate and normalize persisted memory data."""
+        """Valider la provenance, les dates et le contenu du souvenir."""
         normalized_created_at = _normalize_datetime(
             self.created_at,
             field_name="Memory creation time",
@@ -160,14 +177,19 @@ class Memory:
 
 @dataclass(frozen=True, slots=True)
 class MemoryCandidate:
-    """Represent one validated but non-persistent memory proposal."""
+    """Représenter une proposition validée qui n'est pas encore persistée.
+
+    ``content`` est la formulation candidate, ``source_text`` est un extrait
+    exact obligatoire du message utilisateur et ``confidence`` décrit la
+    fidélité de l'extraction. Aucun identifiant n'existe avant promotion.
+    """
 
     content: str
     source_text: str
     confidence: float
 
     def __post_init__(self) -> None:
-        """Validate candidate content, exact evidence and confidence."""
+        """Valider le contenu, la preuve textuelle exacte et la confiance."""
         object.__setattr__(
             self,
             "content",
@@ -199,7 +221,11 @@ class MemoryCandidate:
 
 @dataclass(frozen=True, slots=True)
 class JournalEntry:
-    """Represent one persisted journal entry."""
+    """Représenter une entrée de journal persistée.
+
+    ``entry_date`` est la date racontée par l'entrée, sans heure ;
+    ``created_at`` est l'instant technique UTC de son enregistrement.
+    """
 
     id: int
     content: str
@@ -207,7 +233,7 @@ class JournalEntry:
     created_at: datetime
 
     def __post_init__(self) -> None:
-        """Validate and normalize persisted journal data."""
+        """Valider et normaliser les données persistées du journal."""
         if (
             isinstance(self.entry_date, datetime)
             or not isinstance(self.entry_date, date)
@@ -240,7 +266,7 @@ class JournalEntry:
 
 
 def _validate_identifier(identifier: int) -> int:
-    """Return a validated positive persisted identifier."""
+    """Retourner un identifiant persistant entier strictement positif."""
     if isinstance(identifier, bool) or not isinstance(identifier, int):
         raise TypeError(
             "Persisted identifier must be an integer."
@@ -259,7 +285,7 @@ def _normalize_required_text(
     *,
     field_name: str,
 ) -> str:
-    """Return normalized non-empty business text."""
+    """Retourner un texte métier non vide après retrait des espaces externes."""
     if not isinstance(value, str):
         raise TypeError(
             f"{field_name} must be a string."
@@ -278,7 +304,7 @@ def _normalize_required_text(
 def _normalize_task_status(
     status: TaskStatus,
 ) -> TaskStatus:
-    """Return a validated task status."""
+    """Retourner un statut de tâche appartenant à la liste fermée."""
     if not isinstance(status, str):
         raise TypeError(
             "Task status must be a string."
@@ -297,7 +323,7 @@ def _normalize_task_status(
 def _normalize_memory_source(
     source: MemorySource,
 ) -> MemorySource:
-    """Return a validated known memory provenance."""
+    """Retourner une provenance mémoire connue et normalisée."""
     if not isinstance(source, str):
         raise TypeError(
             "Memory source must be a string."
@@ -321,7 +347,11 @@ def _normalize_memory_source(
 def _validate_optional_source_text(
     source_text: str | None,
 ) -> str | None:
-    """Validate optional exact user evidence without rewriting it."""
+    """Valider une preuve utilisateur facultative sans la réécrire.
+
+    Les espaces sont contrôlés mais la chaîne originale est conservée pour que
+    ``source_text`` reste un extrait inspectable du message source.
+    """
     if source_text is None:
         return None
 
@@ -341,7 +371,7 @@ def _validate_optional_source_text(
 def _normalize_memory_confidence(
     confidence: float,
 ) -> float:
-    """Return confidence in the validated recording mechanism."""
+    """Retourner la confiance bornée dans le mécanisme d'enregistrement."""
     if isinstance(confidence, bool) or not isinstance(
         confidence,
         (int, float),
@@ -369,7 +399,7 @@ def _normalize_datetime(
     *,
     field_name: str,
 ) -> datetime:
-    """Return one timezone-aware datetime normalized to UTC."""
+    """Retourner une date-heure consciente de son fuseau et normalisée en UTC."""
     if not isinstance(value, datetime):
         raise TypeError(
             f"{field_name} must be a datetime."
@@ -388,7 +418,7 @@ def _normalize_optional_datetime(
     *,
     field_name: str,
 ) -> datetime | None:
-    """Normalize an optional timezone-aware datetime."""
+    """Normaliser une date-heure facultative consciente de son fuseau."""
     if value is None:
         return None
 

@@ -1,4 +1,21 @@
-"""Core orchestration for the personal AI assistant."""
+"""Orchestration métier d'un tour de conversation de Fripouille.
+
+``AssistantCore`` reçoit un message déjà acquis par une interface. Il gère
+l'historique temporaire, demande une réponse structurée au client de modèle,
+fait exécuter les intentions autorisées par ``ActionRegistry`` et orchestre
+l'analyse puis la promotion éventuelle d'un candidat mémoire.
+
+Frontière d'autorité essentielle::
+
+    message -> ModelClient (proposition d'intention)
+                -> AssistantCore (choix du chemin)
+                    -> ActionRegistry (validation et permission)
+                    -> réponse visible
+
+Le modèle ne reçoit donc jamais un accès direct aux actions, à SQLite ou au
+hardware. Ce module ne présente pas non plus la réponse dans une interface :
+cette dernière étape appartient à :mod:`assistant_ia.runtime`.
+"""
 
 from __future__ import annotations
 
@@ -69,11 +86,16 @@ _MEMORY_CONFIRMATION_REFUSED = frozenset(
 
 
 class AssistantCoreError(RuntimeError):
-    """Raised when the assistant cannot complete a requested operation."""
+    """Traduire un échec d'orchestration en erreur stable du coeur."""
 
 
 class AssistantCore:
-    """Coordinate messages, model responses and executable actions."""
+    """Coordonner messages, propositions du modèle, actions et mémoire.
+
+    Les dépendances sont injectables pour isoler chaque responsabilité dans
+    les tests. L'instance conserve le contexte et les résultats du dernier
+    tour ; elle doit donc vivre pendant toute une session d'interface.
+    """
 
     def __init__(
         self,
@@ -88,7 +110,12 @@ class AssistantCore:
             MemoryPromotionService | None
         ) = None,
     ) -> None:
-        """Create the assistant core with optional injected dependencies."""
+        """Créer le coeur avec les dépendances fournies ou leurs valeurs par défaut.
+
+        Les champs ``last_*`` sont des diagnostics du dernier tour. Le champ
+        ``_pending_memory_promotion`` est différent : il porte un état métier
+        temporaire qui attend une réponse explicite oui/non de l'utilisateur.
+        """
         if (
             action_registry is not None
             and not isinstance(action_registry, ActionRegistry)
@@ -106,6 +133,8 @@ class AssistantCore:
                 "ActivePersonContext."
             )
 
+        # Cette identité est stable et sert seulement aux valeurs par défaut.
+        # Aucune réponse du modèle ne peut la modifier.
         default_identity = build_default_identity()
 
         self._person_context = (
@@ -135,6 +164,8 @@ class AssistantCore:
             if action_registry is not None
             else ActionRegistry()
         )
+        # Les objets d'analyse et de promotion sont séparés : le premier ne
+        # persiste rien, le second applique les règles applicatives de mémoire.
         self._last_intent: Intent | None = None
         self._memory_candidate_analyzer = memory_candidate_analyzer
         self._memory_promotion_service = memory_promotion_service
@@ -150,58 +181,71 @@ class AssistantCore:
 
     @property
     def context(self) -> ConversationContext:
-        """Return the conversation context managed by the assistant."""
+        """Retourner l'historique temporaire géré par le coeur."""
         return self._context
 
     @property
     def person_context(self) -> ActivePersonContext:
-        """Return the current conversational person context."""
+        """Retourner la personne actuellement active dans la conversation."""
         return self._person_context
 
     @property
     def action_registry(self) -> ActionRegistry:
-        """Return the executable action registry used by the assistant."""
+        """Retourner le registre contrôlé des actions exécutables."""
         return self._action_registry
 
     @property
     def last_intent(self) -> Intent | None:
-        """Return the last successfully identified intent."""
+        """Retourner la dernière intention structurée identifiée."""
         return self._last_intent
 
     @property
     def last_memory_candidates(
         self,
     ) -> tuple[MemoryCandidate, ...]:
-        """Return validated non-persistent candidates from the last turn."""
+        """Retourner les candidats mémoire validés mais non persistés du tour."""
         return self._last_memory_candidates
 
     @property
     def last_memory_promotion_proposal(
         self,
     ) -> MemoryPromotionProposal | None:
-        """Return the most recent application-owned promotion proposal."""
+        """Retourner la dernière proposition de promotion créée par l'application."""
         return self._last_memory_promotion_proposal
 
     @property
     def pending_memory_promotion(
         self,
     ) -> MemoryPromotionProposal | None:
-        """Return the single proposal awaiting explicit user consent."""
+        """Retourner l'unique proposition qui attend un consentement explicite."""
         return self._pending_memory_promotion
 
     def process_message(self, user_message: str) -> str:
-        """Process one user message and return the assistant response."""
+        """Traiter un message et retourner le texte brut résolu du coeur.
+
+        La méthode peut écrire via une action autorisée ou une promotion de
+        mémoire confirmée. Les erreurs Ollama sont converties en
+        :class:`AssistantCoreError`; les erreurs contrôlées d'action et de
+        mémoire deviennent des réponses stables pour l'utilisateur.
+        """
+        # 1. Une confirmation mémoire en attente a priorité sur Ollama et les
+        # actions. Un « oui » ne doit jamais être réinterprété comme un nouvel
+        # ordre général par le modèle.
         pending_response = self._resolve_pending_memory_confirmation(
             user_message
         )
         if pending_response is not None:
             return pending_response
 
+        # 2. Sans confirmation reconnue, le message commence un tour normal.
+        # Les diagnostics du tour précédent sont remis à zéro avant l'analyse.
         self._pending_memory_promotion = None
         self._last_memory_candidates = ()
         self._last_memory_promotion_proposal = None
         current_user_message = self._context.add_user_message(user_message)
 
+        # La détection de présentation est déterministe et limitée au message
+        # explicite ; elle n'autorise pas le modèle à inventer une identité.
         presented_person = detect_presented_person(
             user_message
         )
@@ -212,10 +256,12 @@ class AssistantCore:
                     presented_person
                 )
             except ValueError:
-                # The assistant's reserved name can never become
-                # the active user's identity.
+                # Le nom réservé de l'assistant ne peut jamais devenir
+                # l'identité de la personne active.
                 pass
 
+        # 3. Le client produit à la fois un texte et une intention structurée.
+        # Le coeur ne fait confiance qu'aux objets déjà validés par ce client.
         try:
             model_response = self._model_client.generate_response(
                 self._context.messages,
@@ -225,17 +271,24 @@ class AssistantCore:
                 "The local language model could not produce a response."
             ) from error
 
+        # Cette récupération ciblée conserve un contenu de journal explicite
+        # lorsque le JSON du modèle a omis ce paramètre, sans élargir l'intent.
         resolved_intent = _recover_missing_journal_content(
             model_response.intent,
             user_message,
         )
         self._last_intent = resolved_intent
 
+        # 4. Une conversation utilise le texte généré ; une intention d'action
+        # passe obligatoirement par le registre applicatif.
         assistant_content = self._resolve_assistant_content(
             model_response=model_response,
             intent=resolved_intent,
         )
 
+        # 5. La détection automatique de souvenirs est réservée aux échanges
+        # conversationnels. Le texte d'une commande ne devient ainsi jamais
+        # accidentellement un souvenir personnel.
         if (
             resolved_intent.name == "conversation"
             and self._memory_candidate_analyzer is not None
@@ -249,6 +302,9 @@ class AssistantCore:
             except MemoryCandidateAnalysisError:
                 self._last_memory_candidates = ()
 
+        # 6. Un candidat n'est pas encore un souvenir. Le service applicatif
+        # décide s'il est nouveau, connu, similaire ou contradictoire, puis
+        # formule au plus une proposition contrôlée.
         if (
             self._last_memory_candidates
             and self._memory_promotion_service is not None
@@ -269,6 +325,8 @@ class AssistantCore:
                     + _render_memory_promotion_proposal(proposal)
                 )
 
+        # 7. Seul le contenu effectivement renvoyé est ajouté à l'historique.
+        # Les diagnostics internes restent hors du contexte envoyé à Ollama.
         self._context.add_assistant_message(
             assistant_content
         )
@@ -276,7 +334,11 @@ class AssistantCore:
         return assistant_content
 
     def reset_conversation(self) -> None:
-        """Clear the current conversation context and identified intent."""
+        """Réinitialiser la session temporaire sans effacer SQLite.
+
+        La personne active, les diagnostics et une confirmation en attente
+        sont oubliés. Les souvenirs, tâches et entrées de journal persistent.
+        """
         self._context.clear()
         self._person_context.reset()
         self._last_intent = None
@@ -288,7 +350,12 @@ class AssistantCore:
         self,
         candidates: tuple[MemoryCandidate, ...],
     ) -> MemoryPromotionProposal | None:
-        """Select at most one actionable proposal from a bounded result."""
+        """Choisir au plus une proposition actionnable parmi les candidats.
+
+        Une demande nécessitant confirmation est prioritaire. Sinon la
+        première proposition informative (« déjà connu » par exemple) est
+        conservée. La méthode ne modifie jamais la base.
+        """
         if self._memory_promotion_service is None:
             return None
 
@@ -305,7 +372,12 @@ class AssistantCore:
         self,
         user_message: str,
     ) -> str | None:
-        """Handle explicit yes/no without invoking the model or an action."""
+        """Traiter un oui/non explicite sans invoquer modèle ni registre.
+
+        Retourne ``None`` si aucune proposition n'attend ou si le message ne
+        correspond pas aux réponses bornées. Une acceptation peut persister
+        la proposition ; un refus ne touche pas à SQLite.
+        """
         proposal = self._pending_memory_promotion
         if proposal is None:
             return None
@@ -355,7 +427,12 @@ class AssistantCore:
         model_response: ModelResponse,
         intent: Intent,
     ) -> str:
-        """Resolve safe visible content from a structured response."""
+        """Résoudre le contenu visible à partir d'une réponse structurée.
+
+        Une intention conversationnelle garde le texte du modèle. Toute
+        intention exécutable passe par ``ActionRegistry`` ; les noms inconnus,
+        validations et erreurs d'exécution suivent des réponses contrôlées.
+        """
         if intent.name == "conversation":
             return model_response.content
 
@@ -376,7 +453,12 @@ def _recover_missing_journal_content(
     intent: Intent,
     user_message: str,
 ) -> Intent:
-    """Recover explicit journal content omitted by the model."""
+    """Récupérer un contenu de journal explicite omis par le modèle.
+
+    Cette correction déterministe ne s'applique qu'à ``write_journal`` et au
+    séparateur public prévu. Elle retourne un nouvel :class:`Intent` immuable
+    plutôt que de modifier celui produit par le client.
+    """
     if intent.name != "write_journal":
         return intent
 
@@ -409,7 +491,12 @@ def _recover_missing_journal_content(
 def _render_memory_promotion_proposal(
     proposal: MemoryPromotionProposal,
 ) -> str:
-    """Render one controlled proposal without granting it authority."""
+    """Formuler une proposition mémoire contrôlée sans lui donner d'autorité.
+
+    Le texte explique l'opération calculée par l'application. Il ne déclenche
+    aucune écriture : ``AssistantCore`` attend encore le consentement lorsque
+    ``requires_confirmation`` est vrai.
+    """
     candidate_content = proposal.candidate.content
     related_memory = proposal.related_memory
 

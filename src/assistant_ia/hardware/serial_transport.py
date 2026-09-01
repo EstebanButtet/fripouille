@@ -1,4 +1,9 @@
-"""Framed serial transport for assistant hardware."""
+"""Transport série cadré pour les échanges avec le hardware.
+
+Une commande devient ``@<UTF-8>\n``. Le transport accumule les octets reçus,
+ignore le bruit antérieur au marqueur et retourne une réponse complète avant
+le délai. Il ne comprend pas la sémantique de l'écran ou d'un futur actionneur.
+"""
 
 from __future__ import annotations
 
@@ -14,20 +19,24 @@ MAX_COMMAND_BYTES = 255
 
 
 class SerialConnection(Protocol):
-    """Provide raw byte access to one serial connection."""
+    """Contrat minimal d'accès aux octets d'une connexion série."""
 
     def read(self, max_bytes: int) -> bytes:
-        """Read up to the requested number of available bytes."""
+        """Lire au plus le nombre demandé d'octets disponibles."""
 
     def write(self, data: bytes) -> None:
-        """Write raw bytes to the serial connection."""
+        """Écrire des octets bruts sur la connexion."""
 
     def close(self) -> None:
-        """Close the serial connection."""
+        """Fermer la connexion série."""
 
 
 class FramedSerialTransport:
-    """Exchange synchronized line commands over a serial connection."""
+    """Échanger des lignes synchronisées au-dessus d'une connexion série.
+
+    Les horloges et la fonction de pause sont injectables pour tester les délais
+    sans attendre réellement. Le tampon survit entre les lectures partielles.
+    """
 
     def __init__(
         self,
@@ -38,7 +47,7 @@ class FramedSerialTransport:
         monotonic: Callable[[], float] = time.monotonic,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
-        """Create the transport around an already-open connection."""
+        """Créer le transport autour d'une connexion déjà ouverte."""
         if response_timeout <= 0:
             raise ValueError(
                 "Serial response timeout must be positive."
@@ -67,7 +76,12 @@ class FramedSerialTransport:
         self._receive_buffer = bytearray()
 
     def request(self, command: str) -> str:
-        """Send one framed command and return one framed response."""
+        """Cadrer une commande, l'envoyer et attendre une réponse cadrée.
+
+        Les lectures sont non bloquantes au niveau de la connexion ; la boucle
+        applique ici le délai global et convertit les erreurs d'E/S en
+        ``HardwareTransportError``.
+        """
         encoded_command = self._encode_command(
             command
         )
@@ -123,7 +137,7 @@ class FramedSerialTransport:
         )
 
     def close(self) -> None:
-        """Close the underlying serial connection."""
+        """Fermer la connexion série sous-jacente."""
         try:
             self._connection.close()
         except OSError as error:
@@ -135,7 +149,7 @@ class FramedSerialTransport:
     def _encode_command(
         command: str,
     ) -> bytes:
-        """Validate and encode one protocol command."""
+        """Valider une commande puis l'encoder en UTF-8 sans son cadrage."""
         if not isinstance(command, str):
             raise TypeError(
                 "Hardware command must be a string."
@@ -170,7 +184,11 @@ class FramedSerialTransport:
     def _extract_response(
         self,
     ) -> str | None:
-        """Extract the next complete framed response from buffered bytes."""
+        """Extraire la prochaine réponse complète depuis le tampon.
+
+        Retourne ``None`` si le cadre est incomplet. Le bruit avant ``@`` est
+        supprimé et une charge vide est ignorée avant de chercher la suivante.
+        """
         while True:
             marker_index = self._receive_buffer.find(
                 FRAME_MARKER

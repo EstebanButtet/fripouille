@@ -1,4 +1,9 @@
-"""Structured language model response definitions."""
+"""Modèle de réponse structurée remis par le client de langage au coeur.
+
+Le texte, le modèle utilisé et l'intention appartiennent au même résultat
+validé. Cette structure ne signifie pas que le texte du LLM a autorité : le
+coeur choisit encore entre conversation et exécution contrôlée d'une action.
+"""
 
 from __future__ import annotations
 
@@ -9,14 +14,19 @@ from assistant_ia.intelligence.intent import Intent
 
 @dataclass(frozen=True, slots=True)
 class ModelResponse:
-    """Represent a validated response produced by a language model."""
+    """Représenter une réponse du modèle normalisée mais non exécutée.
+
+    ``content`` est le texte conversationnel ou un marqueur interne pour une
+    action ; ``model`` sert au diagnostic ; ``intent`` dirige l'orchestration.
+    La dataclass immuable garantit leur cohérence après validation.
+    """
 
     content: str
     model: str
     intent: Intent
 
     def __post_init__(self) -> None:
-        """Validate and normalize the response fields."""
+        """Valider les types et retirer les espaces extérieurs des textes."""
         if not isinstance(self.content, str):
             raise TypeError("Model response content must be a string.")
 

@@ -1,4 +1,14 @@
-"""Temporary lightweight tkinter conversation interface."""
+"""Interface conversationnelle tkinter légère et provisoire (FRP-IA-02B).
+
+La GUI possède un contrôleur testable, un état d'affichage et une fenêtre
+tkinter. Le traitement potentiellement lent du runtime s'effectue dans un
+thread worker afin de ne pas bloquer la boucle graphique ; toute modification
+des widgets revient ensuite sur le thread tkinter grâce à ``root.after``.
+
+Le visage dessiné ici est un substitut temporaire, pas le « vrai visage » futur
+de FRP-IA-10. Cette interface n'ajoute aucune capacité au coeur et, faute de
+handler de confirmation GUI, les actions sensibles restent refusées par défaut.
+"""
 
 from __future__ import annotations
 
@@ -33,14 +43,19 @@ DATABASE_ERROR_MESSAGE = (
 
 @dataclass(slots=True)
 class ChatDisplayState:
-    """Represent only the exchange currently visible in the GUI."""
+    """Représenter uniquement l'échange actuellement visible.
+
+    Cette dataclass mutable est un état de vue, pas l'historique de
+    ``ConversationContext``. La GUI remplace ses deux bulles à chaque tour,
+    tandis que le runtime conserve la conversation complète bornée.
+    """
 
     user_message: str = ""
     assistant_message: str = INITIAL_ASSISTANT_MESSAGE
     is_waiting: bool = False
 
     def begin_turn(self, user_message: str) -> None:
-        """Replace the user bubble and preserve the assistant bubble."""
+        """Remplacer la bulle utilisateur et marquer la réponse en attente."""
         normalized_message = user_message.strip()
         if not normalized_message:
             raise ValueError("GUI user message cannot be empty.")
@@ -50,7 +65,7 @@ class ChatDisplayState:
         self.is_waiting = True
 
     def finish_turn(self, assistant_message: str) -> None:
-        """Replace the assistant bubble when the response is ready."""
+        """Remplacer la bulle assistant et terminer l'attente visible."""
         normalized_message = assistant_message.strip()
         if not normalized_message:
             raise ValueError("GUI assistant message cannot be empty.")
@@ -59,9 +74,14 @@ class ChatDisplayState:
 
 
 class GuiConversationController:
-    """Keep testable bubble state around the shared AssistantRuntime."""
+    """Isoler l'état testable de la vue autour du runtime partagé.
+
+    Le contrôleur ignore les widgets tkinter. Il peut donc être testé sans
+    écran réel et constitue l'unique chemin de la GUI vers l'assistant.
+    """
 
     def __init__(self, runtime: AssistantRuntime) -> None:
+        """Créer le contrôleur avec l'unique runtime de la session GUI."""
         if not isinstance(runtime, AssistantRuntime):
             raise TypeError("GUI requires an AssistantRuntime.")
         self._runtime = runtime
@@ -69,18 +89,23 @@ class GuiConversationController:
 
     @property
     def runtime(self) -> AssistantRuntime:
-        """Return the only assistant boundary called by the GUI."""
+        """Retourner l'unique frontière assistant appelée par la GUI."""
         return self._runtime
 
     def begin_message(self, user_message: str) -> None:
-        """Start one visible turn without clearing the previous answer."""
+        """Commencer un tour visible sans effacer encore l'ancienne réponse."""
         self.state.begin_turn(user_message)
 
     def generate_response(
         self,
         error_reporter: Callable[[BaseException], None] | None = None,
     ) -> str:
-        """Generate the current response; callers may run this in a worker."""
+        """Générer la réponse courante, éventuellement dans un worker.
+
+        Les erreurs attendues du modèle reçoivent un message dédié. Toute autre
+        exception est rapportée si un callback de diagnostic a été fourni,
+        puis convertie en texte générique pour la bulle.
+        """
         if not self.state.is_waiting:
             raise RuntimeError("No GUI response is pending.")
         try:
@@ -97,12 +122,16 @@ class GuiConversationController:
             return RUNTIME_ERROR_MESSAGE
 
     def complete_response(self, assistant_message: str) -> None:
-        """Finish the visible turn on the GUI thread."""
+        """Terminer l'état visible depuis le thread GUI."""
         self.state.finish_turn(assistant_message)
 
 
 class FripouilleWindow:
-    """Display one comic-like exchange around a fixed temporary face."""
+    """Afficher un échange à deux bulles autour d'un visage provisoire.
+
+    L'objet possède les widgets pendant toute la vie de la fenêtre. Il délègue
+    les décisions au contrôleur et ne lit jamais directement le coeur.
+    """
 
     def __init__(
         self,
@@ -111,6 +140,7 @@ class FripouilleWindow:
         *,
         debug: bool = False,
     ) -> None:
+        """Construire les widgets et rendre l'état initial de la conversation."""
         self._root = root
         self._controller = controller
         self._debug = debug
@@ -198,6 +228,7 @@ class FripouilleWindow:
         *,
         background: str,
     ) -> tk.Label:
+        """Créer une bulle réutilisable avec le style commun de la fenêtre."""
         return tk.Label(
             parent,
             text="",
@@ -215,7 +246,7 @@ class FripouilleWindow:
 
     @staticmethod
     def _create_face(parent: tk.Misc) -> tk.Canvas:
-        """Create the replaceable provisional face widget."""
+        """Créer le widget de visage provisoire destiné à être remplacé."""
         face = tk.Canvas(
             parent,
             width=170,
@@ -248,6 +279,13 @@ class FripouilleWindow:
         return face
 
     def _submit_message(self, event: object | None = None) -> str:
+        """Valider la saisie et lancer un seul worker de réponse.
+
+        Le bouton et le champ sont désactivés jusqu'au retour afin d'empêcher
+        deux appels concurrents sur le même runtime et son contexte mutable.
+        ``"break"`` indique à tkinter de ne pas poursuivre le traitement de
+        l'événement Entrée.
+        """
         if self._controller.state.is_waiting:
             return "break"
 
@@ -261,6 +299,8 @@ class FripouilleWindow:
         self._send_button.configure(state=tk.DISABLED)
         self._render_state()
 
+        # Aucun widget ne doit être modifié depuis ce worker ; il appelle
+        # seulement le contrôleur et remet ensuite le résultat à tkinter.
         worker = threading.Thread(
             target=self._process_message,
             name="fripouille-gui-response",
@@ -270,15 +310,19 @@ class FripouilleWindow:
         return "break"
 
     def _process_message(self) -> None:
+        """Calculer la réponse hors du thread GUI puis planifier sa livraison."""
         response = self._controller.generate_response(
             display_runtime_error if self._debug else None
         )
+        # ``after(0, ...)`` replace l'appel de finition dans la boucle tkinter,
+        # seule autorisée à toucher aux widgets de la fenêtre.
         self._root.after(
             0,
             lambda: self._finish_response(response),
         )
 
     def _finish_response(self, response: str) -> None:
+        """Réactiver la saisie et afficher la réponse sur le thread GUI."""
         self._controller.complete_response(response)
         self._entry.configure(state=tk.NORMAL)
         self._send_button.configure(state=tk.NORMAL)
@@ -286,6 +330,7 @@ class FripouilleWindow:
         self._entry.focus_set()
 
     def _render_state(self) -> None:
+        """Projeter l'état du contrôleur dans les widgets visibles."""
         state = self._controller.state
         user_text = (
             f"Vous\n{state.user_message}"
@@ -302,7 +347,7 @@ class FripouilleWindow:
 
 
 def run_gui(*, debug: bool = False) -> None:
-    """Build and run the temporary Windows GUI."""
+    """Construire le runtime, la fenêtre provisoire et lancer tkinter."""
     try:
         if debug:
             runtime = build_default_runtime(

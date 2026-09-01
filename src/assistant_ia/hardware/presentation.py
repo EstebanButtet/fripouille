@@ -1,4 +1,9 @@
-"""Presentation of assistant responses on the physical display."""
+"""Présentation d'une réponse finale sur l'écran physique.
+
+Ce presenter implémente le même contrat que les autres sorties du runtime. Il
+aplatit les retours à la ligne, neutralise le marqueur de synchronisation et
+tronque proprement en UTF-8 avant d'appeler ``DisplayController``.
+"""
 
 from __future__ import annotations
 
@@ -16,13 +21,17 @@ _TRUNCATION_SUFFIX = "..."
 
 
 class DisplayResponsePresenter:
-    """Present final assistant responses on the physical display."""
+    """Présenter sur l'écran une prévisualisation de la réponse finale.
+
+    Il reçoit seulement un texte déjà résolu ; il ne demande rien au LLM et ne
+    choisit aucune action physique.
+    """
 
     def __init__(
         self,
         display: DisplayController,
     ) -> None:
-        """Create a presenter using one display controller."""
+        """Créer le presenter avec un contrôleur d'écran de haut niveau."""
         if not isinstance(display, DisplayController):
             raise TypeError(
                 "Display response presenter requires "
@@ -35,7 +44,7 @@ class DisplayResponsePresenter:
         self,
         response: str,
     ) -> None:
-        """Present a protocol-safe preview of one assistant response."""
+        """Présenter une version de la réponse compatible avec le protocole."""
         if not isinstance(response, str):
             raise TypeError(
                 "Presented assistant response must be a string."
@@ -53,7 +62,7 @@ class DisplayResponsePresenter:
 def _prepare_display_text(
     response: str,
 ) -> str:
-    """Convert arbitrary response text to the current display protocol."""
+    """Convertir un texte quelconque vers le protocole d'affichage actuel."""
     normalized = " ".join(
         response.split()
     )
@@ -73,7 +82,11 @@ def _truncate_utf8(
     text: str,
     max_bytes: int,
 ) -> str:
-    """Truncate text without splitting a UTF-8 character."""
+    """Tronquer en octets sans couper un caractère UTF-8.
+
+    Python itère par caractères Unicode ; la boucle additionne leur taille
+    encodée et réserve d'abord la place du suffixe ``...``.
+    """
     encoded = text.encode(
         "utf-8"
     )

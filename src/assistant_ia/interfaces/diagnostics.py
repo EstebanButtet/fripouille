@@ -1,4 +1,9 @@
-"""Small opt-in console diagnostics for interactive interfaces."""
+"""Diagnostics console facultatifs pour les interfaces interactives.
+
+Les diagnostics sont installés uniquement avec ``--debug`` et restent hors des
+bulles ainsi que de l'historique envoyé à Ollama. Ils observent un
+``TurnDiagnostics`` immuable sans influencer la réponse.
+"""
 
 from __future__ import annotations
 
@@ -6,10 +11,10 @@ from assistant_ia.runtime import TurnDiagnostics
 
 
 class ConsoleDiagnosticReporter:
-    """Print internal turn data only when explicitly installed."""
+    """Afficher les données internes seulement lorsqu'il est injecté."""
 
     def report(self, diagnostics: TurnDiagnostics) -> None:
-        """Print a compact technical snapshot of one completed turn."""
+        """Afficher une photographie technique compacte du tour terminé."""
         intent_name = (
             diagnostics.intent.name
             if diagnostics.intent is not None
@@ -32,5 +37,5 @@ class ConsoleDiagnosticReporter:
 
 
 def display_runtime_error(error: BaseException) -> None:
-    """Print a technical interface error without putting it in a bubble."""
+    """Afficher une erreur technique sans la placer dans la conversation."""
     print(f"[debug] erreur_runtime={error!r}")

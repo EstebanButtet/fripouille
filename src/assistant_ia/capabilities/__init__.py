@@ -1,1 +1,1 @@
-"""Assistant capability context."""
+"""Description contrôlée des capacités réellement disponibles."""

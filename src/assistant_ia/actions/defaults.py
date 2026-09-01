@@ -1,4 +1,13 @@
-"""Default executable actions for the local assistant."""
+"""Implémentations par défaut des actions locales de Fripouille.
+
+Les handlers métier traduisent des paramètres textuels déjà autorisés en
+appels de repositories. Le handler système ajoute permission, confirmation et
+liste blanche avant le lanceur Windows. :func:`build_default_action_registry`
+assemble ensuite les seules actions effectivement exposées au coeur.
+
+Le LLM ne connaît aucun de ces objets : il produit une intention, puis
+``Action`` et ``ActionRegistry`` valident le contrat avant d'atteindre ici.
+"""
 
 from __future__ import annotations
 
@@ -43,7 +52,12 @@ from assistant_ia.system.windows import (
 
 
 class _BusinessActionHandlers:
-    """Execute validated persistent assistant actions."""
+    """Exécuter les opérations persistantes après validation de l'action.
+
+    Cette classe privée regroupe les dépendances pour fournir des méthodes
+    liées utilisables comme handlers. Elle ne décide pas quels noms d'intention
+    sont autorisés : cette décision appartient au registre.
+    """
 
     def __init__(
         self,
@@ -52,7 +66,7 @@ class _BusinessActionHandlers:
         journal_repository: JournalRepository,
         current_date: Callable[[], date],
     ) -> None:
-        """Store the repositories used by the action handlers."""
+        """Conserver les repositories et le fournisseur de date locale."""
         self._task_repository = task_repository
         self._memory_repository = memory_repository
         self._journal_repository = journal_repository
@@ -62,7 +76,7 @@ class _BusinessActionHandlers:
         self,
         parameters: Mapping[str, str],
     ) -> str:
-        """Create one persistent task."""
+        """Créer une tâche persistante et formater son accusé de réception."""
         due_at = _parse_optional_due_at(
             parameters.get("due_at")
         )
@@ -85,7 +99,7 @@ class _BusinessActionHandlers:
         self,
         parameters: Mapping[str, str],
     ) -> str:
-        """List persistent tasks using an optional status filter."""
+        """Lister les tâches persistantes avec un filtre de statut facultatif."""
         status = _parse_task_status(
             parameters.get("status", "pending")
         )
@@ -102,7 +116,7 @@ class _BusinessActionHandlers:
         self,
         parameters: Mapping[str, str],
     ) -> str:
-        """Complete one task selected by its stable identifier."""
+        """Terminer la tâche choisie par son identifiant stable."""
         task_id = _parse_positive_identifier(
             parameters["task_id"],
             field_name="L’identifiant de tâche",
@@ -128,7 +142,7 @@ class _BusinessActionHandlers:
         self,
         parameters: Mapping[str, str],
     ) -> str:
-        """Save one persistent assistant memory."""
+        """Enregistrer un souvenir explicitement demandé par l'utilisateur."""
         memory = self._memory_repository.save_memory(
             parameters["content"]
         )
@@ -142,7 +156,7 @@ class _BusinessActionHandlers:
         self,
         parameters: Mapping[str, str],
     ) -> str:
-        """Find memories matching one literal query."""
+        """Chercher les souvenirs correspondant à une requête littérale."""
         memories = self._memory_repository.find_memories(
             parameters["query"]
         )
@@ -164,7 +178,7 @@ class _BusinessActionHandlers:
         self,
         parameters: Mapping[str, str],
     ) -> str:
-        """Delete one memory selected by its stable identifier."""
+        """Supprimer le souvenir choisi par son identifiant stable."""
         memory_id = _parse_positive_identifier(
             parameters["memory_id"],
             field_name="L’identifiant de souvenir",
@@ -188,7 +202,7 @@ class _BusinessActionHandlers:
         self,
         parameters: Mapping[str, str],
     ) -> str:
-        """Write one persistent journal entry."""
+        """Écrire une entrée de journal à la date demandée ou courante."""
         raw_entry_date = parameters.get("entry_date")
 
         if raw_entry_date is None:
@@ -213,7 +227,12 @@ class _BusinessActionHandlers:
 
 
 class _SystemActionHandlers:
-    """Execute controlled system assistant actions."""
+    """Exécuter les actions système derrière les contrôles de sécurité.
+
+    Le lanceur résout d'abord le nom dans sa liste blanche. La politique décide
+    ensuite si l'action est refusée, autorisée ou soumise au handler de
+    confirmation fourni par l'interface.
+    """
 
     def __init__(
         self,
@@ -221,7 +240,7 @@ class _SystemActionHandlers:
         confirmation_handler: ConfirmationHandler,
         windows_launcher: WindowsApplicationLauncher,
     ) -> None:
-        """Store the security and Windows dependencies."""
+        """Conserver politique, frontière de confirmation et lanceur Windows."""
         self._permission_policy = permission_policy
         self._confirmation_handler = confirmation_handler
         self._windows_launcher = windows_launcher
@@ -230,7 +249,12 @@ class _SystemActionHandlers:
         self,
         parameters: Mapping[str, str],
     ) -> str:
-        """Launch one explicitly allowlisted Windows application."""
+        """Lancer une application explicitement présente dans la liste blanche.
+
+        Une annulation produit une réponse normale sans effet. Une cible non
+        autorisée est une erreur de validation ; un échec après autorisation
+        devient une erreur d'exécution.
+        """
         try:
             application = self._windows_launcher.resolve_application(
                 parameters["application"]
@@ -240,6 +264,8 @@ class _SystemActionHandlers:
                 "Cette application n’est pas autorisée."
             ) from error
 
+        # La résolution de la cible précède la confirmation : l'utilisateur
+        # confirme ainsi un nom canonique et connu, pas une chaîne arbitraire.
         decision = self._permission_policy.decision_for(
             "launch_application"
         )
@@ -297,7 +323,13 @@ def build_default_action_registry(
     confirmation_handler: ConfirmationHandler | None = None,
     windows_launcher: WindowsApplicationLauncher | None = None,
 ) -> ActionRegistry:
-    """Build the explicitly available assistant actions."""
+    """Construire le registre des actions explicitement disponibles.
+
+    Les actions persistantes sont toujours ajoutées avec leurs repositories.
+    ``launch_application`` n'existe dans le registre que lorsqu'un lanceur
+    Windows est fourni. Sans handler interactif, sa confirmation est refusée
+    par défaut plutôt qu'accordée implicitement.
+    """
     if not isinstance(task_repository, TaskRepository):
         raise TypeError(
             "Default actions require a TaskRepository."
@@ -356,6 +388,8 @@ def build_default_action_registry(
         ),
     )
 
+    # Cette liste est la source concrète des capacités d'action annoncées au
+    # modèle. Connaître un IntentName ne suffit jamais pour exécuter l'action.
     actions = [
         Action(
             name="create_task",
@@ -417,7 +451,7 @@ def build_default_action_registry(
 def _parse_optional_due_at(
     value: str | None,
 ) -> datetime | None:
-    """Parse one unambiguous timezone-aware ISO task deadline."""
+    """Interpréter une échéance ISO non ambiguë incluant son fuseau."""
     if value is None:
         return None
 
@@ -447,7 +481,7 @@ def _parse_optional_due_at(
 def _parse_task_status(
     value: str,
 ) -> TaskStatus | None:
-    """Parse one task list status parameter."""
+    """Interpréter le filtre de statut d'une liste de tâches."""
     normalized_value = value.lower()
 
     if normalized_value == "all":
@@ -467,7 +501,11 @@ def _parse_positive_identifier(
     *,
     field_name: str,
 ) -> int:
-    """Parse a strictly positive identifier using safe notation."""
+    """Interpréter un identifiant positif dans les notations admises.
+
+    Le parseur accepte quelques décorations utilisateur contrôlées mais refuse
+    tout signe, exposant ou caractère non décimal avant d'appeler ``int``.
+    """
     normalized_value = value.strip()
     normalized_casefolded = normalized_value.casefold()
 
@@ -510,7 +548,7 @@ def _parse_positive_identifier(
 
 
 def _parse_entry_date(value: str) -> date:
-    """Parse one strict ISO 8601 journal date."""
+    """Interpréter une date de journal strictement au format ISO 8601."""
     try:
         return date.fromisoformat(value)
     except ValueError as error:
@@ -523,7 +561,7 @@ def _parse_entry_date(value: str) -> date:
 def _resolve_current_date(
     current_date: Callable[[], date],
 ) -> date:
-    """Return a validated application-local current date."""
+    """Obtenir et valider la date locale fournie par l'application."""
     resolved_date = current_date()
 
     if (
@@ -538,7 +576,7 @@ def _resolve_current_date(
 
 
 def _format_datetime(value: datetime) -> str:
-    """Format one persisted UTC datetime for terminal display."""
+    """Formater une date-heure UTC persistée pour l'affichage."""
     return value.strftime(
         "%d.%m.%Y à %H:%M UTC"
     )
@@ -549,7 +587,7 @@ def _format_task_list(
     *,
     status: TaskStatus | None,
 ) -> str:
-    """Format one deterministic task list for terminal display."""
+    """Formater une liste de tâches déterministe avec statut et échéance."""
     if not tasks:
         if status == "pending":
             return "Aucune tâche en attente."
@@ -584,5 +622,5 @@ def _format_task_list(
 
 
 def _local_today() -> date:
-    """Return the date in the computer's configured local timezone."""
+    """Retourner la date du fuseau local configuré sur l'ordinateur."""
     return datetime.now().astimezone().date()

@@ -1,4 +1,10 @@
-"""Deterministic lexical retrieval for persistent memories."""
+"""Rappel lexical déterministe des souvenirs persistants.
+
+Ce module reçoit le message conversationnel courant, extrait des termes utiles
+et classe une vue bornée des souvenirs SQLite. Il produit des
+:class:`RetrievedMemory` inspectables et limite ensuite ce qui peut entrer dans
+le prompt. Il ne modifie aucun souvenir et n'interprète aucune action.
+"""
 
 from __future__ import annotations
 
@@ -105,7 +111,12 @@ _TOKEN_PATTERN = re.compile(r"[^\W_]+", flags=re.UNICODE)
 
 @dataclass(frozen=True, slots=True)
 class RetrievedMemory:
-    """Expose one memory with its inspectable lexical relevance."""
+    """Associer un souvenir à sa pertinence lexicale inspectable.
+
+    ``score`` est la part des termes utiles de la requête retrouvée dans le
+    souvenir ; ce n'est ni une confiance de vérité ni une décision du LLM.
+    ``matched_terms`` rend ce classement explicable.
+    """
 
     memory: Memory
     score: float
@@ -113,7 +124,11 @@ class RetrievedMemory:
 
 
 class ContextualMemoryRetriever:
-    """Select relevant persistent memories without changing them."""
+    """Sélectionner des souvenirs pertinents sans jamais les modifier.
+
+    Le repository fournit une vue récente bornée ; le retriever applique en
+    mémoire un classement lexical stable et retourne au plus ``limit`` objets.
+    """
 
     def __init__(
         self,
@@ -121,7 +136,7 @@ class ContextualMemoryRetriever:
         *,
         candidate_limit: int = DEFAULT_RETRIEVAL_CANDIDATE_LIMIT,
     ) -> None:
-        """Create a retriever over one bounded repository view."""
+        """Créer le retriever sur une vue bornée du repository."""
         if not isinstance(repository, MemoryRepository):
             raise TypeError(
                 "Contextual memory repository must be a MemoryRepository."
@@ -151,7 +166,12 @@ class ContextualMemoryRetriever:
         query: str,
         limit: int = DEFAULT_CONTEXTUAL_MEMORY_LIMIT,
     ) -> tuple[RetrievedMemory, ...]:
-        """Return the strongest lexical matches in deterministic order."""
+        """Retourner les correspondances lexicales les plus fortes.
+
+        Les égalités sont départagées par confiance d'enregistrement, date de
+        création puis identifiant. Une requête sans terme significatif ne
+        rappelle rien, plutôt que de choisir des souvenirs arbitraires.
+        """
         query_terms = _useful_terms(query)
         normalized_limit = _validate_retrieval_limit(limit)
 
@@ -160,6 +180,8 @@ class ContextualMemoryRetriever:
 
         matches: list[RetrievedMemory] = []
 
+        # Le score est calculé localement sur des ensembles de mots ; Ollama
+        # n'intervient ni dans la sélection ni dans son ordre.
         for memory in self._repository.list_memories(
             limit=self._candidate_limit,
         ):
@@ -195,7 +217,11 @@ class ContextualMemoryRetriever:
 def bound_contextual_memories(
     memories: tuple[RetrievedMemory, ...],
 ) -> tuple[RetrievedMemory, ...]:
-    """Select whole ranked memories within strict prompt budgets."""
+    """Sélectionner des souvenirs entiers dans les budgets stricts du prompt.
+
+    Un souvenir trop long est ignoré, jamais tronqué : son sens et sa preuve
+    restent intacts. L'ordre classé fourni en entrée est préservé.
+    """
     if not isinstance(memories, tuple):
         raise TypeError(
             "Retrieved memories must be provided as a tuple."
@@ -231,7 +257,7 @@ def bound_contextual_memories(
 
 
 def _useful_terms(value: str) -> frozenset[str]:
-    """Return distinct normalized lexical terms from one text."""
+    """Extraire les termes lexicaux distincts et utiles d'un texte."""
     if not isinstance(value, str):
         raise TypeError(
             "Memory retrieval text must be a string."
@@ -255,7 +281,7 @@ def _useful_terms(value: str) -> frozenset[str]:
 
 
 def _validate_retrieval_limit(limit: int) -> int:
-    """Return a bounded positive contextual result limit."""
+    """Valider une limite positive de résultats contextuels."""
     if isinstance(limit, bool) or not isinstance(limit, int):
         raise TypeError(
             "Memory retrieval limit must be an integer."

@@ -1,4 +1,19 @@
-"""Application assembly for the local personal assistant."""
+"""Assemblage des composants de l'application locale Fripouille.
+
+Ce module est la *racine de composition* : il crée les objets concrets, relie
+leurs dépendances et rend un :class:`AssistantCore` ou un
+:class:`AssistantRuntime` prêt à l'emploi. Il reçoit éventuellement des
+doubles de test ou des composants déjà construits ; sinon il choisit les
+implémentations locales par défaut (SQLite, Ollama et actions Windows).
+
+Il ne traite aucun message lui-même. Son rôle est uniquement de câbler le
+flux suivant sans mélanger les responsabilités::
+
+    interface -> AssistantRuntime -> AssistantCore
+                                      |-> client Ollama
+                                      |-> registre d'actions
+                                      `-> services de mémoire
+"""
 
 from __future__ import annotations
 
@@ -43,7 +58,11 @@ from assistant_ia.system.windows import WindowsApplicationLauncher
 
 
 class ApplicationInitializationError(RuntimeError):
-    """Raised when the assistant application cannot be initialized."""
+    """Signaler qu'une dépendance indispensable n'a pas pu être initialisée.
+
+    L'exception masque ici les détails SQLite derrière une erreur de niveau
+    application, tout en conservant l'erreur d'origine comme cause Python.
+    """
 
 
 def build_default_assistant(
@@ -57,7 +76,20 @@ def build_default_assistant(
     identity: AssistantIdentity | None = None,
     person_context: ActivePersonContext | None = None,
 ) -> AssistantCore:
-    """Build a fully initialized assistant with available actions."""
+    """Construire le coeur avec ses actions, sa mémoire et son modèle.
+
+    Les paramètres optionnels réalisent une injection de dépendances : les
+    tests peuvent fournir un client de modèle, une base ou une politique
+    contrôlés, tandis que l'application normale reçoit les objets par défaut.
+    La fonction initialise SQLite et peut lever
+    :class:`ApplicationInitializationError` si cette étape échoue.
+
+    Lorsque ``model_client`` est fourni, les automatismes spécifiques à
+    Ollama (rappel et promotion de mémoire) ne sont pas ajoutés implicitement.
+    Cela maintient un client injecté maître de son comportement de test.
+    """
+    # Les validations précoces rendent les erreurs d'assemblage explicites.
+    # Elles ne constituent pas des validations de messages utilisateur.
     if database is not None and not isinstance(
         database,
         SQLiteDatabase,
@@ -102,6 +134,8 @@ def build_default_assistant(
         )
 
     try:
+        # Une même connexion logique est partagée par tous les repositories.
+        # Ils restent ensuite responsables de traduire leur domaine en SQL.
         resolved_database = (
             database
             if database is not None
@@ -125,6 +159,9 @@ def build_default_assistant(
         resolved_database
     )
 
+    # Le registre est la frontière applicative qui autorise et valide les
+    # actions. Le modèle ne reçoit jamais directement les repositories ni le
+    # lanceur Windows.
     action_registry = build_default_action_registry(
         task_repository=TaskRepository(
             resolved_database
@@ -214,7 +251,12 @@ def build_default_runtime(
     presenter: ResponsePresenter | None = None,
     diagnostic_reporter: DiagnosticReporter | None = None,
 ) -> AssistantRuntime:
-    """Build the default assistant runtime with optional presentation."""
+    """Envelopper un coeur assemblé dans la frontière d'interface runtime.
+
+    Le ``presenter`` reçoit la réponse destinée à l'utilisateur ; le
+    ``diagnostic_reporter`` reçoit séparément les informations techniques du
+    tour. Aucun des deux ne participe à la décision métier du coeur.
+    """
     assistant = build_default_assistant(
         database=database,
         model_client=model_client,

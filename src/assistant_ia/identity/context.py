@@ -1,4 +1,9 @@
-"""Rendering of structured assistant identity context."""
+"""Rendu déterministe de l'identité stable dans le contexte du modèle.
+
+Le module reçoit un :class:`AssistantIdentity` déjà validé et produit une
+section textuelle de prompt. Il ne laisse pas Ollama modifier l'objet source et
+n'enregistre aucune préférence nouvelle.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,11 @@ from assistant_ia.identity.models import AssistantIdentity
 def render_identity_context(
     identity: AssistantIdentity,
 ) -> str:
-    """Render one stable identity as deterministic model context."""
+    """Rendre une identité stable sous forme de contexte déterministe.
+
+    L'ordre explicite des sections rend le prompt reproductible et maintient
+    séparés traits, style, niveaux, règles et limites personnelles.
+    """
     if not isinstance(identity, AssistantIdentity):
         raise TypeError(
             "Identity context requires an AssistantIdentity."

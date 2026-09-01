@@ -1,4 +1,11 @@
-"""Deterministic validation for fixed-total allocations."""
+"""Validation déterministe des répartitions possédant un total fixe.
+
+Le modèle peut proposer des parts, mais le total et l'unité restent détenus
+par l'application. Les nombres sont convertis en :class:`Decimal` afin que la
+somme soit exacte et vérifiable, sans approximation des flottants binaires.
+Ce module reçoit du JSON ou un fragment de durée et produit des modèles
+immuables ; il ne contacte ni Ollama ni une interface.
+"""
 
 from __future__ import annotations
 
@@ -86,25 +93,31 @@ ALLOCATION_PROPOSAL_SCHEMA = {
 
 
 class AllocationTargetParseError(ValueError):
-    """Raised when user-supplied target text is not exactly parseable."""
+    """Signaler qu'un total fourni par l'utilisateur reste ambigu."""
 
 
 class AllocationFormatError(ValueError):
-    """Raised when a structured allocation payload is malformed."""
+    """Signaler qu'une charge structurée ne respecte pas le format attendu."""
 
 
 class AllocationMismatchError(ValueError):
-    """Raised when allocation parts do not match the required total."""
+    """Signaler que la somme des parts diffère du total imposé."""
 
 
 @dataclass(frozen=True, slots=True)
 class AllocationTarget:
-    """Define a fixed total owned by the application."""
+    """Définir le total et l'unité autoritatifs de l'application.
+
+    ``total`` est positif, fini et exact ; ``unit`` est une étiquette
+    normalisée. ``frozen`` empêche la proposition du modèle de déplacer la
+    cible après sa construction.
+    """
 
     total: Decimal
     unit: str
 
     def __post_init__(self) -> None:
+        """Valider le total exact et normaliser son unité."""
         if not isinstance(self.total, Decimal):
             raise TypeError(
                 "Allocation target total must be a Decimal."
@@ -141,12 +154,13 @@ class AllocationTarget:
 
 @dataclass(frozen=True, slots=True)
 class AllocationPart:
-    """Represent one exact portion of a fixed-total allocation."""
+    """Représenter une part positive et nommée de la répartition."""
 
     label: str
     amount: Decimal
 
     def __post_init__(self) -> None:
+        """Valider le montant exact et normaliser le libellé de la part."""
         if not isinstance(self.label, str):
             raise TypeError(
                 "Allocation part label must be a string."
@@ -178,13 +192,18 @@ class AllocationPart:
 
 @dataclass(frozen=True, slots=True)
 class FixedTotalAllocation:
-    """Represent and validate an exact allocation against a fixed total."""
+    """Réunir des parts et les comparer à un total fixe.
+
+    La construction vérifie la forme, tandis que :meth:`require_exact`
+    applique explicitement l'invariant de somme lorsque le flux l'exige.
+    """
 
     total: Decimal
     unit: str
     parts: tuple[AllocationPart, ...]
 
     def __post_init__(self) -> None:
+        """Valider les types, l'unité et la présence d'au moins une part."""
         if not isinstance(self.total, Decimal):
             raise TypeError(
                 "Allocation total must be a Decimal."
@@ -232,7 +251,7 @@ class FixedTotalAllocation:
 
     @property
     def allocated_total(self) -> Decimal:
-        """Return the exact sum of every allocation part."""
+        """Retourner la somme exacte de toutes les parts."""
         return sum(
             (
                 part.amount
@@ -243,16 +262,16 @@ class FixedTotalAllocation:
 
     @property
     def difference(self) -> Decimal:
-        """Return required total minus allocated total."""
+        """Retourner le total requis moins la somme des parts."""
         return self.total - self.allocated_total
 
     @property
     def is_exact(self) -> bool:
-        """Return whether the allocation matches the total exactly."""
+        """Indiquer si les parts correspondent exactement au total."""
         return self.difference == Decimal("0")
 
     def require_exact(self) -> None:
-        """Raise when the allocation does not match its required total."""
+        """Lever ``AllocationMismatchError`` si la somme n'est pas exacte."""
         if self.is_exact:
             return
 
@@ -268,7 +287,7 @@ def _parse_decimal(
     *,
     field_name: str,
 ) -> Decimal:
-    """Parse one protocol decimal from its required string form."""
+    """Convertir une chaîne décimale du protocole en valeur exacte."""
     if not isinstance(value, str):
         raise AllocationFormatError(
             f"{field_name} must be a string."
@@ -301,7 +320,11 @@ def _parse_decimal(
 def parse_allocation_payload(
     payload: object,
 ) -> FixedTotalAllocation:
-    """Convert one strict structured payload into an allocation."""
+    """Convertir une charge strictement structurée en répartition.
+
+    Les champs supplémentaires sont rejetés afin qu'une sortie du modèle ne
+    puisse pas transporter silencieusement une instruction hors contrat.
+    """
     if not isinstance(payload, dict):
         raise AllocationFormatError(
             "Allocation payload must be an object."
@@ -345,6 +368,8 @@ def parse_allocation_payload(
             "Allocation parts cannot be empty."
         )
 
+    # Chaque part est reconstruite dans un modèle validé. Le dictionnaire JSON
+    # externe ne traverse donc jamais directement le reste de l'application.
     parsed_parts: list[AllocationPart] = []
 
     for index, raw_part in enumerate(
@@ -418,7 +443,7 @@ def parse_allocation_payload(
 def _reject_json_constant(
     value: str,
 ) -> object:
-    """Reject non-standard JSON numeric constants."""
+    """Rejeter les constantes numériques JSON non standard (NaN, Infinity)."""
     raise AllocationFormatError(
         f"Invalid JSON numeric constant: {value}."
     )
@@ -429,7 +454,12 @@ def parse_allocation_proposal_json(
     *,
     target: AllocationTarget,
 ) -> FixedTotalAllocation:
-    """Parse model-proposed parts against an authoritative target."""
+    """Valider les parts du modèle contre une cible autoritative.
+
+    Le JSON ne peut fournir que ``parts`` : ``total`` et ``unit`` proviennent
+    obligatoirement de ``target``. La somme exacte est vérifiée ensuite par le
+    client qui consomme le résultat.
+    """
     if not isinstance(content, str):
         raise TypeError(
             "Allocation proposal content must be a string."
@@ -441,6 +471,8 @@ def parse_allocation_proposal_json(
         )
 
     try:
+        # ``Decimal`` dès le décodage préserve exactement les nombres écrits
+        # dans le JSON, contrairement à une conversion intermédiaire en float.
         payload = json.loads(
             content,
             parse_int=Decimal,
@@ -548,7 +580,7 @@ _FRENCH_HOUR_WORDS = {
 def _duration_target_from_minutes(
     minutes: Decimal,
 ) -> AllocationTarget:
-    """Build one positive finite duration target in minutes."""
+    """Construire une cible positive et finie exprimée en minutes."""
     if not minutes.is_finite():
         raise AllocationTargetParseError(
             "Duration target must be finite."
@@ -568,7 +600,12 @@ def _duration_target_from_minutes(
 def parse_duration_target_text(
     text: str,
 ) -> AllocationTarget:
-    """Parse one exact standalone duration fragment deterministically."""
+    """Interpréter déterministement un fragment de durée autonome.
+
+    Seules les formes explicitement listées sont acceptées. Une phrase
+    ambiguë, approximative ou contenant du contexte supplémentaire est
+    rejetée plutôt que devinée.
+    """
     if not isinstance(text, str):
         raise TypeError(
             "Duration target text must be a string."

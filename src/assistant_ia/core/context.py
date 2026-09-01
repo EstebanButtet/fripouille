@@ -1,4 +1,13 @@
-"""In-memory conversation context management."""
+"""Historique conversationnel temporaire, conservé uniquement en mémoire.
+
+Ce module reçoit les textes utilisateur et assistant validés par le coeur et
+les conserve dans leur ordre d'arrivée. Il produit des tuples immuables pour
+le client de modèle et :mod:`assistant_ia.intelligence.turn`.
+
+Il ne s'agit pas de la mémoire persistante de Fripouille : fermer le processus
+fait disparaître cet historique, tandis que les souvenirs durables passent par
+les repositories du paquet :mod:`assistant_ia.memory`.
+"""
 
 from __future__ import annotations
 
@@ -10,39 +19,49 @@ MessageRole = Literal["user", "assistant"]
 
 @dataclass(frozen=True, slots=True)
 class ConversationMessage:
-    """Represent one message stored in the conversation history."""
+    """Message horodaté par son ordre, avec un rôle et un contenu.
+
+    ``role`` indique qui parle et ``content`` contient le texte normalisé. La
+    dataclass est ``frozen`` : après création, un ancien tour ne peut plus être
+    modifié par mégarde lorsqu'il est transmis au modèle.
+    """
 
     role: MessageRole
     content: str
 
 
 class ConversationContext:
-    """Store conversation messages in memory and preserve their order."""
+    """Posséder et ordonner les messages de la conversation courante.
+
+    La liste interne reste mutable pour ajouter des tours, mais la propriété
+    publique :attr:`messages` en retourne une copie sous forme de tuple. Cette
+    encapsulation empêche un appelant de réordonner directement l'historique.
+    """
 
     def __init__(self) -> None:
-        """Create an empty conversation context."""
+        """Créer un contexte sans aucun message."""
         self._messages: list[ConversationMessage] = []
 
     @property
     def messages(self) -> tuple[ConversationMessage, ...]:
-        """Return the conversation messages as an immutable sequence."""
+        """Retourner un instantané immuable des messages ordonnés."""
         return tuple(self._messages)
 
     @property
     def message_count(self) -> int:
-        """Return the number of messages stored in the context."""
+        """Retourner le nombre de messages actuellement conservés."""
         return len(self._messages)
 
     def add_user_message(self, content: str) -> ConversationMessage:
-        """Add a user message to the conversation."""
+        """Valider puis ajouter un message utilisateur."""
         return self._add_message(role="user", content=content)
 
     def add_assistant_message(self, content: str) -> ConversationMessage:
-        """Add an assistant message to the conversation."""
+        """Valider puis ajouter un message assistant."""
         return self._add_message(role="assistant", content=content)
 
     def clear(self) -> None:
-        """Remove every message from the conversation."""
+        """Supprimer tout l'historique conversationnel temporaire."""
         self._messages.clear()
 
     def _add_message(
@@ -50,7 +69,11 @@ class ConversationContext:
         role: MessageRole,
         content: str,
     ) -> ConversationMessage:
-        """Validate and store one conversation message."""
+        """Normaliser, valider puis stocker un message de l'un des deux rôles.
+
+        Lève ``TypeError`` pour un contenu non textuel et ``ValueError`` pour
+        un texte vide après retrait des espaces extérieurs.
+        """
         if not isinstance(content, str):
             raise TypeError("Message content must be a string.")
 

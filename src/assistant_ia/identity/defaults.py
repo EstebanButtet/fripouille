@@ -1,4 +1,9 @@
-"""Default assistant identity configuration."""
+"""Configuration par défaut de l'identité stable de Fripouille.
+
+Ce module contient les valeurs métier déclaratives et construit un nouveau
+modèle immuable à chaque appel. Ces textes ne sont pas une mémoire apprise et
+ne sont pas modifiés pendant une conversation.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +11,7 @@ from assistant_ia.identity.models import AssistantIdentity
 
 
 def build_default_identity() -> AssistantIdentity:
-    """Build the default stable identity of Fripouille."""
+    """Construire l'identité stable configurée pour Fripouille."""
     return AssistantIdentity(
         name="Fripouille",
         role=(

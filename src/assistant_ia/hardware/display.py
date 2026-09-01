@@ -1,4 +1,9 @@
-"""High-level control of the assistant physical display."""
+"""Contrôle de haut niveau de l'écran physique de Fripouille.
+
+``DisplayController`` convertit une intention d'affichage en commande du
+protocole ``TEXT`` et vérifie l'accusé de réception. Il ignore le port série et
+n'expose pas de primitive écran brute au modèle de langage.
+"""
 
 from __future__ import annotations
 
@@ -10,21 +15,26 @@ MAX_PROTOCOL_LINE_BYTES = 255
 
 
 class DisplayProtocolError(RuntimeError):
-    """Raised when the display returns an unexpected response."""
+    """Signaler que l'écran n'a pas répondu selon le protocole attendu."""
 
 
 class DisplayController:
-    """Control visible content without exposing transport details."""
+    """Contrôler le texte visible sans exposer les détails du transport."""
 
     def __init__(
         self,
         transport: HardwareTransport,
     ) -> None:
-        """Create a display controller using the provided transport."""
+        """Créer le contrôleur au-dessus d'un transport injecté."""
         self._transport = transport
 
     def set_text(self, text: str) -> None:
-        """Replace the text shown on the physical display."""
+        """Remplacer le texte de l'écran après validation du protocole.
+
+        Les retours à la ligne et ``@`` sont réservés au cadrage. La taille est
+        contrôlée en octets UTF-8, car le protocole borne des octets et non le
+        nombre de caractères Python.
+        """
         if not isinstance(text, str):
             raise TypeError(
                 "Display text must be a string."

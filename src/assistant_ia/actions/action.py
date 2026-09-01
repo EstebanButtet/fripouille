@@ -1,4 +1,10 @@
-"""Validated executable assistant action definitions."""
+"""Définition validée d'une action exécutable par l'assistant.
+
+Une :class:`Action` associe un nom d'intention appartenant à la liste fermée à
+un handler applicatif. Avant l'appel, elle contrôle exactement les paramètres
+requis et autorisés. Après l'appel, elle contrôle aussi que le résultat est un
+texte présentable. Le LLM ne reçoit jamais le handler lui-même.
+"""
 
 from __future__ import annotations
 
@@ -41,26 +47,31 @@ ActionHandler = Callable[[Mapping[str, str]], str]
 
 
 class ActionError(RuntimeError):
-    """Base error raised while validating or executing an action."""
+    """Base commune des erreurs contrôlées d'action."""
 
 
 class ActionValidationError(ActionError):
-    """Raised when an action request contains invalid parameters."""
+    """Signaler des paramètres ou une demande d'action invalides."""
 
 
 class ActionExecutionError(ActionError):
-    """Raised when a validated action cannot be executed safely."""
+    """Signaler qu'une action validée n'a pas pu s'exécuter sûrement."""
 
 
 @dataclass(frozen=True, slots=True)
 class Action:
-    """Connect one validated intent contract to an execution handler."""
+    """Relier un contrat d'intention validé à un handler d'exécution.
+
+    ``handler`` reçoit une vue de paramètres textuels et retourne un texte.
+    La dataclass est immuable : le registre ne peut pas voir son exécuteur
+    remplacé après l'enregistrement.
+    """
 
     name: ExecutableIntentName
     handler: ActionHandler
 
     def __post_init__(self) -> None:
-        """Validate the immutable action definition."""
+        """Valider le nom fermé et le handler appelable de l'action."""
         if not isinstance(self.name, str):
             raise TypeError("Action name must be a string.")
 
@@ -81,7 +92,11 @@ class Action:
         )
 
     def execute(self, intent: Intent) -> str:
-        """Validate one intent and execute its registered handler."""
+        """Valider une intention puis appeler le handler enregistré.
+
+        Les erreurs de paramètres et de repository sont traduites en familles
+        d'erreurs distinctes. Une ``ActionError`` déjà explicite est conservée.
+        """
         if not isinstance(intent, Intent):
             raise TypeError("Action execution requires an Intent.")
 
@@ -116,6 +131,8 @@ class Action:
                 f"{unexpected_names}."
             )
 
+        # L'appel n'arrive qu'après validation exacte du contrat de paramètres.
+        # Le handler ne reçoit donc pas les champs arbitraires du JSON Ollama.
         try:
             result = self.handler(intent.parameters)
         except ActionError:

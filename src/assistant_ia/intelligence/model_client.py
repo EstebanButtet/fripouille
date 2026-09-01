@@ -1,4 +1,20 @@
-"""Language model client abstractions and Ollama implementation."""
+"""Contrat de modèle de langage et implémentation HTTP pour Ollama.
+
+``OllamaModelClient`` transforme un historique en un tour borné, effectue
+d'abord une requête structurée d'interprétation, puis choisit soit une réponse
+d'action, soit une génération conversationnelle. Le rappel mémoire n'arrive
+qu'après la décision conversationnelle et ses résultats sont injectés comme
+contexte non autoritatif.
+
+Flux simplifié::
+
+    ConversationTurn -> interprétation JSON validée
+        | intention d'action -> ModelResponse pour AssistantCore
+        ` conversation      -> rappel mémoire -> génération naturelle
+
+Ce client propose des intentions ; il ne les exécute jamais et n'écrit jamais
+dans les repositories.
+"""
 
 from __future__ import annotations
 
@@ -71,22 +87,32 @@ _ACTION_INTERPRETED_CONTENT = (
 
 
 class ModelClientError(RuntimeError):
-    """Raised when a language model cannot produce a valid response."""
+    """Signaler une indisponibilité ou une réponse invalide du modèle."""
 
 
 class ModelClient(Protocol):
-    """Define the operations required from a language model client."""
+    """Contrat minimal attendu par ``AssistantCore`` pour un modèle.
+
+    Grâce au ``Protocol``, un test peut fournir n'importe quel objet possédant
+    ``generate_response`` sans hériter d'une classe concrète Ollama.
+    """
 
     def generate_response(
         self,
         messages: tuple[ConversationMessage, ...],
     ) -> ModelResponse:
-        """Generate a model response from an ordered conversation history."""
+        """Produire une réponse structurée depuis un historique ordonné."""
         ...
 
 
 class OllamaModelClient:
-    """Generate language model responses through the local Ollama API."""
+    """Interpréter puis générer via l'API locale de dialogue Ollama.
+
+    L'instance conserve la configuration réseau et les contextes stables,
+    mais pas l'historique : celui-ci est fourni à chaque appel par le coeur.
+    ``identity`` reste immuable et séparée des souvenirs et de la personne
+    actuellement active.
+    """
 
     def __init__(
         self,
@@ -100,7 +126,13 @@ class OllamaModelClient:
             ContextualMemoryRetriever | None
         ) = None,
     ) -> None:
-        """Create an Ollama client with explicit local configuration."""
+        """Créer le client avec une configuration locale explicite.
+
+        Les dépendances contextuelles sont injectées afin de garder l'appel
+        réseau indépendant de leur construction. Les validations finales
+        garantissent que capacités, retriever, identité et personne décrivent
+        le même assemblage applicatif.
+        """
         if not isinstance(model, str):
             raise TypeError("Model name must be a string.")
 
@@ -227,23 +259,37 @@ class OllamaModelClient:
         self,
         messages: tuple[ConversationMessage, ...],
     ) -> ModelResponse:
-        """Interpret one turn, then generate the required response."""
+        """Interpréter un tour puis produire le type de réponse requis.
+
+        Une intention d'action s'arrête après l'interprétation : le texte du
+        modèle n'est alors pas utilisé pour agir. Une conversation spécialisée
+        est validée déterministement avant calcul ; sinon le chemin standard
+        peut rappeler des souvenirs puis demander un texte naturel.
+        """
+        # 1. Le tour courant est isolé de l'historique projeté avant tout appel
+        # réseau. Le dernier message demeure la source d'autorité actuelle.
         turn = build_conversation_turn(
             messages
         )
 
+        # 2. Cette première requête produit uniquement des métadonnées
+        # structurées. Elle ne génère pas encore la réponse conversationnelle.
         interpretation = self._interpret_turn(
             turn
         )
         intent = interpretation.intent
 
         if intent.name != "conversation":
+            # AssistantCore remettra l'intention au registre. Le client ne
+            # contacte aucune action et ne reprend pas un texte libre d'Ollama.
             return ModelResponse(
                 content=_ACTION_INTERPRETED_CONTENT,
                 model=interpretation.model,
                 intent=intent,
             )
 
+        # 3. Les directives du modèle ne sont que des propositions. La preuve
+        # textuelle doit être retrouvée et interprétée par l'application.
         try:
             directive = resolve_conversation_directive(
                 interpretation.conversation_directive_proposal,
@@ -277,6 +323,8 @@ class OllamaModelClient:
                 intent=intent,
             )
 
+        # 4. Le rappel est volontairement postérieur à l'interprétation : un
+        # souvenir ne peut donc pas être pris pour une commande utilisateur.
         contextual_memories = (
             self._retrieve_contextual_memories(
                 turn.current_user_message.content
@@ -300,7 +348,13 @@ class OllamaModelClient:
         self,
         turn: ConversationTurn,
     ) -> TurnInterpretation:
-        """Interpret the current request and conversation metadata."""
+        """Interpréter la demande courante en JSON strict.
+
+        La méthode exige exactement les champs du schéma, reconstruit les
+        objets validés et convertit toute incohérence en ``ModelClientError``.
+        """
+        # Température nulle et schéma JSON réduisent la variabilité, mais la
+        # validation Python reste nécessaire : le modèle demeure non fiable.
         payload = {
             "model": self._model,
             "messages": self._build_turn_messages(
@@ -407,7 +461,7 @@ class OllamaModelClient:
         self,
         allocation: FixedTotalAllocation,
     ) -> str:
-        """Render a validated allocation without changing its numbers."""
+        """Rendre lisible une répartition validée sans changer ses nombres."""
         if not isinstance(
             allocation,
             FixedTotalAllocation,
@@ -450,7 +504,7 @@ class OllamaModelClient:
         turn: ConversationTurn,
         target: AllocationTarget,
     ) -> FixedTotalAllocation:
-        """Generate and deterministically validate one allocation."""
+        """Demander des parts à Ollama puis vérifier leur somme exactement."""
         if not isinstance(turn, ConversationTurn):
             raise TypeError(
                 "Allocation turn must be a ConversationTurn."
@@ -505,7 +559,11 @@ class OllamaModelClient:
         *,
         contextual_memories: tuple[RetrievedMemory, ...] = (),
     ) -> tuple[str, str]:
-        """Generate only the natural conversational response."""
+        """Générer uniquement le texte naturel d'une conversation.
+
+        Les souvenirs reçus sont à nouveau bornés avant leur rendu dans le
+        prompt. Retourne le contenu normalisé et le nom de modèle annoncé.
+        """
         payload = {
             "model": self._model,
             "messages": self._build_turn_messages(
@@ -547,7 +605,11 @@ class OllamaModelClient:
         self,
         user_message: str,
     ) -> tuple[RetrievedMemory, ...]:
-        """Recall conversational context, failing soft on storage errors."""
+        """Rappeler un contexte mémoire en tolérant les erreurs de stockage.
+
+        Une panne mémoire ne doit pas empêcher Fripouille de converser : les
+        erreurs contrôlées produisent simplement un contexte vide.
+        """
         if self._contextual_memory_retriever is None:
             return ()
 
@@ -571,7 +633,12 @@ class OllamaModelClient:
         system_prompt: str,
         turn: ConversationTurn,
     ) -> list[dict[str, str]]:
-        """Build ordered Ollama messages for one prepared turn."""
+        """Construire les messages Ollama ordonnés pour un tour préparé.
+
+        Le prompt système précède l'historique. Lorsqu'un historique existe,
+        un second marqueur système délimite explicitement le tour courant afin
+        que les anciens messages ne soient pas confondus avec la demande.
+        """
         messages = [
             {
                 "role": "system",
@@ -607,7 +674,12 @@ class OllamaModelClient:
         self,
         payload: dict[str, object],
     ) -> tuple[str, str]:
-        """Send one Ollama request and return model name and message text."""
+        """Envoyer une requête locale et valider l'enveloppe de réponse.
+
+        Les erreurs HTTP, réseau, délai, décodage et format sont traduites en
+        ``ModelClientError``. La méthode retourne deux chaînes validées : le
+        nom du modèle et le contenu du message Ollama.
+        """
         request_data = json.dumps(
             payload,
             ensure_ascii=False,

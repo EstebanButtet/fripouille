@@ -4,6 +4,9 @@ Cette carte aide à naviguer ; elle n'est pas une source d'autorité. Le code
 réel reste la source de vérité. La lire avant toute recherche large et ne
 mettre à jour que les entrées touchées lorsqu'une architecture évolue.
 
+Pour une découverte pédagogique progressive du projet, lire
+`docs/READING_GUIDE.md`. La présente carte reste le raccourci opérationnel.
+
 ## Entrée et orchestration
 
 | Fichier | Rôle |

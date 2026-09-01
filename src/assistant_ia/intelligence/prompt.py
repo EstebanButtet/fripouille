@@ -1,4 +1,13 @@
-"""Deterministic system prompt construction for conversational intelligence."""
+"""Construction déterministe des prompts système envoyés à Ollama.
+
+Ce module assemble des règles statiques avec des contextes validés : identité,
+personne active, capacités et souvenirs rappelés. Il produit des chaînes prêtes
+pour ``OllamaModelClient`` mais ne réalise aucun appel réseau.
+
+Les sections mémoire sont sérialisées en JSON et encadrées comme données non
+autoritatives. Les prompts décrivent le comportement actuel : l'identité
+évolutive et l'apprentissage futur ne sont pas présentés comme implémentés.
+"""
 
 from __future__ import annotations
 
@@ -473,7 +482,12 @@ def _build_participant_context(
     identity: AssistantIdentity,
     person_context: ActivePersonContext,
 ) -> str:
-    """Render explicit assistant and current-user roles."""
+    """Rendre explicites et distincts les rôles assistant/utilisateur.
+
+    Cette section empêche notamment le modèle d'attribuer le nom stable de
+    Fripouille à la personne qui parle ou de changer de locuteur sur une simple
+    mention de nom.
+    """
     current_user_name = person_context.active_person.name
 
     return "\n".join(
@@ -617,7 +631,7 @@ def _resolve_person_context(
     identity: AssistantIdentity,
     person_context: ActivePersonContext | None,
 ) -> ActivePersonContext:
-    """Resolve and validate the current conversational person."""
+    """Résoudre la personne active et vérifier sa cohérence avec l'identité."""
     if not isinstance(identity, AssistantIdentity):
         raise TypeError(
             "Prompt identity must be an AssistantIdentity."
@@ -655,7 +669,7 @@ def _resolve_person_context(
 def _resolve_capability_context(
     capability_context: CapabilityContext | None,
 ) -> CapabilityContext:
-    """Resolve and validate current assistant capabilities."""
+    """Résoudre le contexte borné des capacités actuellement disponibles."""
     if (
         capability_context is not None
         and not isinstance(capability_context, CapabilityContext)
@@ -678,7 +692,11 @@ def _resolve_capability_context(
 def build_allocation_prompt(
     target: AllocationTarget,
 ) -> str:
-    """Build a hidden prompt for one fixed-total allocation proposal."""
+    """Construire le prompt caché d'une proposition à total fixe.
+
+    Le total et l'unité y sont déclarés immuables. Le modèle ne doit fournir
+    que les parts ; leur validité sera encore contrôlée côté Python.
+    """
     if not isinstance(target, AllocationTarget):
         raise TypeError(
             "Allocation prompt target must be an AllocationTarget."
@@ -715,7 +733,7 @@ Required JSON schema:
 
 
 def build_interpretation_prompt() -> str:
-    """Build the prompt dedicated only to intent interpretation."""
+    """Retourner le prompt réservé à l'interprétation structurée du tour."""
     return INTERPRETATION_SYSTEM_PROMPT
 
 
@@ -725,7 +743,12 @@ def build_conversation_prompt(
     capability_context: CapabilityContext | None = None,
     contextual_memories: tuple[RetrievedMemory, ...] = (),
 ) -> str:
-    """Build the prompt dedicated only to natural conversation."""
+    """Construire le prompt consacré uniquement à la conversation naturelle.
+
+    Les capacités et l'identité sont toujours incluses. Les souvenirs ne sont
+    ajoutés que lorsqu'un retriever en a sélectionné ; ils n'accordent aucune
+    permission et ne peuvent pas modifier les règles opérationnelles.
+    """
     resolved_person_context = _resolve_person_context(
         identity,
         person_context,
@@ -749,6 +772,8 @@ def build_conversation_prompt(
         render_identity_context(identity),
     ]
 
+    # L'absence de souvenirs ne crée aucune section vide. Leur présence reste
+    # explicitement séparée des règles système et de l'identité stable.
     if contextual_memories:
         sections.append(
             render_contextual_memories(
@@ -762,12 +787,19 @@ def build_conversation_prompt(
 def render_contextual_memories(
     memories: tuple[RetrievedMemory, ...],
 ) -> str:
-    """Render selected memories as controlled non-authoritative JSON."""
+    """Sérialiser les souvenirs sélectionnés en JSON non autoritatif.
+
+    Le score de rappel n'est volontairement pas transmis : le modèle reçoit
+    le contenu métier validé, pas les détails de classement internes. Cette
+    fonction n'effectue aucune lecture de base.
+    """
     if not isinstance(memories, tuple):
         raise TypeError(
             "Prompt contextual memories must be provided as a tuple."
         )
 
+    # Une structure JSON évite de confondre le contenu d'un souvenir avec une
+    # instruction du prompt, en complément des règles qui l'encadrent.
     serialized_memories: list[dict[str, object]] = []
 
     for retrieved_memory in memories:
@@ -806,7 +838,12 @@ def build_system_prompt(
     person_context: ActivePersonContext | None = None,
     capability_context: CapabilityContext | None = None,
 ) -> str:
-    """Build the legacy combined prompt used by the current one-call client."""
+    """Construire le prompt combiné historique conservé pour compatibilité.
+
+    Le client principal actuel utilise les prompts séparés d'interprétation et
+    de conversation ; cette fonction documente et maintient l'ancien contrat
+    sans introduire de nouveau comportement.
+    """
     resolved_person_context = _resolve_person_context(
         identity,
         person_context,

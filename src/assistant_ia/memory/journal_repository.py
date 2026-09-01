@@ -1,4 +1,9 @@
-"""SQLite repository for persistent assistant journal entries."""
+"""Repository SQLite des entrées persistantes du journal.
+
+Ce module traduit l'écriture d'une note datée en transaction SQLite et
+reconstruit un :class:`JournalEntry` validé. Il ne décide pas si une intention
+est autorisée : cette validation se situe dans les actions et leur registre.
+"""
 
 from __future__ import annotations
 
@@ -21,14 +26,19 @@ _JOURNAL_ENTRY_SELECT_COLUMNS = """
 
 
 class JournalRepository:
-    """Write journal entries stored in SQLite."""
+    """Écrire des entrées de journal dans SQLite.
+
+    La date courante et l'horloge sont injectables pour rendre les tests
+    indépendants du calendrier réel. Une entrée possède une date métier et un
+    instant technique de création distincts.
+    """
 
     def __init__(
         self,
         database: SQLiteDatabase,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        """Create a journal repository with injectable persistence and time."""
+        """Créer le repository avec base, calendrier et horloge injectables."""
         if not isinstance(database, SQLiteDatabase):
             raise TypeError(
                 "Journal repository database must be a SQLiteDatabase."
@@ -47,7 +57,7 @@ class JournalRepository:
         content: str,
         entry_date: date,
     ) -> JournalEntry:
-        """Persist and return one journal entry."""
+        """Valider, persister puis relire une entrée de journal."""
         normalized_content = _normalize_required_text(
             content,
             field_name="Journal content",
@@ -100,7 +110,7 @@ class JournalRepository:
 def _journal_entry_from_row(
     journal_entry_row: tuple[object, ...] | None,
 ) -> JournalEntry:
-    """Convert one validated SQLite row into a journal model."""
+    """Convertir une ligne SQLite complète en modèle de journal validé."""
     if journal_entry_row is None or len(journal_entry_row) != 4:
         raise RepositoryError(
             "Stored journal entry data is incomplete."
@@ -137,7 +147,7 @@ def _normalize_required_text(
     *,
     field_name: str,
 ) -> str:
-    """Return normalized non-empty text."""
+    """Retourner un texte non vide après normalisation extérieure."""
     if not isinstance(value, str):
         raise TypeError(
             f"{field_name} must be a string."
@@ -154,7 +164,7 @@ def _normalize_required_text(
 
 
 def _validate_entry_date(value: date) -> date:
-    """Return a date without time information."""
+    """Valider et retourner une date sans information horaire."""
     if isinstance(value, datetime) or not isinstance(value, date):
         raise TypeError(
             "Journal entry date must be a date."
@@ -168,7 +178,7 @@ def _normalize_datetime(
     *,
     field_name: str,
 ) -> datetime:
-    """Return a timezone-aware datetime normalized to UTC."""
+    """Retourner une date-heure avec fuseau normalisée en UTC."""
     if not isinstance(value, datetime):
         raise TypeError(
             f"{field_name} must be a datetime."
@@ -183,7 +193,7 @@ def _normalize_datetime(
 
 
 def _serialize_datetime(value: datetime) -> str:
-    """Serialize one normalized datetime as ISO 8601."""
+    """Sérialiser une date-heure normalisée au format ISO 8601."""
     return value.astimezone(timezone.utc).isoformat()
 
 
@@ -192,7 +202,7 @@ def _parse_date(
     *,
     field_name: str,
 ) -> date:
-    """Parse one persisted ISO 8601 date."""
+    """Reconstruire une date persistée au format ISO 8601."""
     if not isinstance(value, str):
         raise TypeError(
             f"{field_name} must be stored as text."
@@ -211,7 +221,7 @@ def _parse_datetime(
     *,
     field_name: str,
 ) -> datetime:
-    """Parse one persisted ISO 8601 datetime."""
+    """Reconstruire une date-heure persistée au format ISO 8601."""
     if not isinstance(value, str):
         raise TypeError(
             f"{field_name} must be stored as text."
@@ -226,5 +236,5 @@ def _parse_datetime(
 
 
 def _utc_now() -> datetime:
-    """Return the current timezone-aware UTC time."""
+    """Retourner l'instant courant en UTC avec information de fuseau."""
     return datetime.now(timezone.utc)
