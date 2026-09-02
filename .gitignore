@@ -9,6 +9,8 @@ __pycache__/
 # Variables privées et secrets
 .env
 .env.local
+.env.*
+!.env.example
 
 # Bases de données locales
 *.db
@@ -17,6 +19,12 @@ __pycache__/
 
 # Journaux
 logs/
+*.log
+
+# Fichiers temporaires et sauvegardes
+*.tmp
+*.bak
+*.dump
 
 # Tests et outils
 .pytest_cache/
@@ -32,6 +40,19 @@ dist/
 
 # Configuration locale de VS Code
 .vscode/
+
+# Configuration locale des IDE
+.idea/
+
+# Fichiers système
+Thumbs.db
+.DS_Store
+
+# Données locales de Fripouille
+data/
+captures/
+calibration/local/
+models/
 
 # ESP-IDF generated configuration
 
