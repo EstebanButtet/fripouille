@@ -85,8 +85,8 @@ Ajouter `--debug` pour les diagnostics console.
 
 `src/assistant_ia/hardware/` porte la frontière PC/ESP32 (transport et
 présentation matérielle). `firmware/` est hors périmètre IA sauf jalon
-explicite. Ne pas inclure la modification locale existante de
-`firmware/fripouille_esp32/main/main.c`.
+explicite. Préserver la version validée sur `main` et ne pas intégrer une
+variante firmware expérimentale dans un commit IA.
 
 ## Tests principaux
 
