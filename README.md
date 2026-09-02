@@ -188,3 +188,10 @@ Fripouille is a personal project in active development. Its architecture is
 experimental, although the current Python baseline is covered by deterministic
 unit tests. Desktop use is the primary supported form today; hardware paths
 remain prototypes, and future embodiment directions are not current features.
+
+## License
+
+Fripouille's original code and documentation are available under the
+[MIT License](LICENSE). Third-party components and generated assets retain
+their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md),
+notably for the Montserrat-derived display font data.
