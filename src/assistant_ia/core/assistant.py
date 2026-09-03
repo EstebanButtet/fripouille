@@ -3,8 +3,8 @@
 ``AssistantCore`` reçoit un message déjà acquis par une interface. Il gère
 l'historique temporaire, résout les présentations explicites, demande une
 réponse structurée au client de modèle, fait exécuter les intentions
-autorisées par ``ActionRegistry`` et orchestre l'analyse puis la promotion
-éventuelle d'un candidat mémoire.
+autorisées par ``ActionRegistry`` et orchestre l'analyse puis les promotions
+éventuelles de candidats mémoire ou profil.
 
 Frontière d'autorité essentielle::
 
@@ -36,6 +36,10 @@ from assistant_ia.intelligence.memory_candidates import (
     MemoryCandidateAnalysisError,
     MemoryCandidateAnalyzer,
 )
+from assistant_ia.intelligence.profile_fact_candidates import (
+    ProfileFactCandidateAnalysisError,
+    ProfileFactCandidateAnalyzer,
+)
 from assistant_ia.intelligence.model_client import (
     ModelClient,
     ModelClientError,
@@ -53,6 +57,12 @@ from assistant_ia.memory.repository import DatabaseError
 from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import build_default_person
 from assistant_ia.people.models import PersonProfile
+from assistant_ia.people.profile_models import ProfileFactCandidate
+from assistant_ia.people.profile_promotion import (
+    ProfileFactPromotionProposal,
+    ProfileFactPromotionService,
+    normalize_profile_fact_equivalence,
+)
 from assistant_ia.people.presentation import detect_presented_person
 from assistant_ia.people.resolution import (
     PersonResolution,
@@ -77,6 +87,11 @@ MEMORY_PROMOTION_ERROR_MESSAGE = (
     "Vérifiez les souvenirs enregistrés avant de réessayer."
 )
 
+PROFILE_PROMOTION_ERROR_MESSAGE = (
+    "Le profil n'a pas pu être modifié. "
+    "Vérifiez les faits enregistrés avant de réessayer."
+)
+
 PERSON_RESOLUTION_ERROR_MESSAGE = (
     "La personne n'a pas pu être résolue. "
     "L'interlocuteur actif n'a pas changé."
@@ -96,13 +111,16 @@ _MEMORY_CONFIRMATION_REFUSED = frozenset(
     }
 )
 
+_PROFILE_CONFIRMATION_ACCEPTED = _MEMORY_CONFIRMATION_ACCEPTED
+_PROFILE_CONFIRMATION_REFUSED = _MEMORY_CONFIRMATION_REFUSED
+
 
 class AssistantCoreError(RuntimeError):
     """Traduire un échec d'orchestration en erreur stable du coeur."""
 
 
 class AssistantCore:
-    """Coordonner messages, propositions du modèle, actions et mémoire.
+    """Coordonner messages, propositions, actions, mémoire et profil.
 
     Les dépendances sont injectables pour isoler chaque responsabilité dans
     les tests. L'instance conserve le contexte et les résultats du dernier
@@ -120,6 +138,12 @@ class AssistantCore:
         ) = None,
         memory_promotion_service: (
             MemoryPromotionService | None
+        ) = None,
+        profile_fact_candidate_analyzer: (
+            ProfileFactCandidateAnalyzer | None
+        ) = None,
+        profile_fact_promotion_service: (
+            ProfileFactPromotionService | None
         ) = None,
         person_resolution_service: (
             PersonResolutionService | None
@@ -207,6 +231,17 @@ class AssistantCore:
         self._pending_memory_promotion: (
             MemoryPromotionProposal | None
         ) = None
+        self._profile_fact_candidate_analyzer = profile_fact_candidate_analyzer
+        self._profile_fact_promotion_service = profile_fact_promotion_service
+        self._last_profile_fact_candidates: tuple[
+            ProfileFactCandidate, ...
+        ] = ()
+        self._last_profile_fact_promotion_proposal: (
+            ProfileFactPromotionProposal | None
+        ) = None
+        self._pending_profile_fact_promotion: (
+            ProfileFactPromotionProposal | None
+        ) = None
 
     @property
     def context(self) -> ConversationContext:
@@ -254,6 +289,27 @@ class AssistantCore:
         """Retourner l'unique proposition qui attend un consentement explicite."""
         return self._pending_memory_promotion
 
+    @property
+    def last_profile_fact_candidates(
+        self,
+    ) -> tuple[ProfileFactCandidate, ...]:
+        """Retourner les candidats de profil non persistés du dernier tour."""
+        return self._last_profile_fact_candidates
+
+    @property
+    def last_profile_fact_promotion_proposal(
+        self,
+    ) -> ProfileFactPromotionProposal | None:
+        """Retourner la dernière proposition applicative de profil."""
+        return self._last_profile_fact_promotion_proposal
+
+    @property
+    def pending_profile_fact_promotion(
+        self,
+    ) -> ProfileFactPromotionProposal | None:
+        """Retourner la proposition précise qui attend un oui ou un non."""
+        return self._pending_profile_fact_promotion
+
     def process_message(self, user_message: str) -> str:
         """Traiter un message et retourner le texte brut résolu du coeur.
 
@@ -262,9 +318,15 @@ class AssistantCore:
         :class:`AssistantCoreError`; les erreurs contrôlées d'action et de
         mémoire deviennent des réponses stables pour l'utilisateur.
         """
-        # 1. Une confirmation mémoire en attente a priorité sur Ollama et les
-        # actions. Un « oui » ne doit jamais être réinterprété comme un nouvel
-        # ordre général par le modèle.
+        # 1. Une confirmation profil ou mémoire en attente a priorité sur
+        # Ollama et les actions. Un « oui » ne doit jamais être réinterprété
+        # comme un nouvel ordre général par le modèle.
+        pending_response = self._resolve_pending_profile_confirmation(
+            user_message
+        )
+        if pending_response is not None:
+            return pending_response
+
         pending_response = self._resolve_pending_memory_confirmation(
             user_message
         )
@@ -274,10 +336,13 @@ class AssistantCore:
         # 2. Sans confirmation reconnue, le message commence un tour normal.
         # Les diagnostics du tour précédent sont remis à zéro avant l'analyse.
         self._pending_memory_promotion = None
+        self._pending_profile_fact_promotion = None
         self._last_intent = None
         self._last_person_resolution = None
         self._last_memory_candidates = ()
         self._last_memory_promotion_proposal = None
+        self._last_profile_fact_candidates = ()
+        self._last_profile_fact_promotion_proposal = None
         current_user_message = self._context.add_user_message(user_message)
 
         # La détection de présentation est déterministe et limitée au message
@@ -327,11 +392,51 @@ class AssistantCore:
             intent=resolved_intent,
         )
 
-        # 5. La détection automatique de souvenirs est réservée aux échanges
-        # conversationnels. Le texte d'une commande ne devient ainsi jamais
-        # accidentellement un souvenir personnel.
+        # 5. Un candidat de profil exige un sujet persistant résolu par
+        # l'application. Le modèle d'analyse ne reçoit jamais cet ID dans son
+        # schéma de sortie et aucune proposition n'écrit directement SQLite.
+        active_person_id = self._person_context.active_person_id
         if (
             resolved_intent.name == "conversation"
+            and active_person_id is not None
+            and self._profile_fact_candidate_analyzer is not None
+        ):
+            try:
+                self._last_profile_fact_candidates = (
+                    self._profile_fact_candidate_analyzer.analyze(
+                        current_user_message.content,
+                        person_id=active_person_id,
+                    )
+                )
+            except ProfileFactCandidateAnalysisError:
+                self._last_profile_fact_candidates = ()
+
+        if (
+            self._last_profile_fact_candidates
+            and self._profile_fact_promotion_service is not None
+        ):
+            try:
+                profile_proposal = self._select_profile_fact_proposal(
+                    self._last_profile_fact_candidates
+                )
+            except (DatabaseError, RepositoryError):
+                profile_proposal = None
+            if profile_proposal is not None:
+                self._last_profile_fact_promotion_proposal = profile_proposal
+                if profile_proposal.requires_confirmation:
+                    self._pending_profile_fact_promotion = profile_proposal
+                assistant_content = (
+                    assistant_content
+                    + "\n\n"
+                    + _render_profile_fact_proposal(profile_proposal)
+                )
+
+        # 6. Une information reconnue comme profil ne devient pas en parallèle
+        # un souvenir général. L'analyse mémoire conserve sinon son ancien
+        # comportement, uniquement pour les échanges conversationnels.
+        if (
+            resolved_intent.name == "conversation"
+            and not self._last_profile_fact_candidates
             and self._memory_candidate_analyzer is not None
         ):
             try:
@@ -343,7 +448,7 @@ class AssistantCore:
             except MemoryCandidateAnalysisError:
                 self._last_memory_candidates = ()
 
-        # 6. Un candidat n'est pas encore un souvenir. Le service applicatif
+        # 7. Un candidat n'est pas encore un souvenir. Le service applicatif
         # décide s'il est nouveau, connu, similaire ou contradictoire, puis
         # formule au plus une proposition contrôlée.
         if (
@@ -366,7 +471,7 @@ class AssistantCore:
                     + _render_memory_promotion_proposal(proposal)
                 )
 
-        # 7. Seul le contenu effectivement renvoyé est ajouté à l'historique.
+        # 8. Seul le contenu effectivement renvoyé est ajouté à l'historique.
         # Les diagnostics internes restent hors du contexte envoyé à Ollama.
         self._context.add_assistant_message(
             assistant_content
@@ -387,6 +492,9 @@ class AssistantCore:
         self._last_memory_candidates = ()
         self._last_memory_promotion_proposal = None
         self._pending_memory_promotion = None
+        self._last_profile_fact_candidates = ()
+        self._last_profile_fact_promotion_proposal = None
+        self._pending_profile_fact_promotion = None
 
     def _resolve_person_presentation(
         self,
@@ -443,6 +551,77 @@ class AssistantCore:
             f"« {presented_person.name} ». "
             "L'interlocuteur actif n'a pas changé."
         )
+
+    def _select_profile_fact_proposal(
+        self,
+        candidates: tuple[ProfileFactCandidate, ...],
+    ) -> ProfileFactPromotionProposal | None:
+        """Choisir au plus une proposition de profil, sans persister."""
+        if self._profile_fact_promotion_service is None:
+            return None
+        known: ProfileFactPromotionProposal | None = None
+        for candidate in candidates:
+            proposal = self._profile_fact_promotion_service.propose(candidate)
+            if proposal.requires_confirmation:
+                return proposal
+            if known is None:
+                known = proposal
+        return known
+
+    def _resolve_pending_profile_confirmation(
+        self,
+        user_message: str,
+    ) -> str | None:
+        """Appliquer seulement un oui/non à la proposition de profil précise."""
+        proposal = self._pending_profile_fact_promotion
+        if proposal is None:
+            return None
+        normalized = normalize_profile_fact_equivalence(user_message)
+        if normalized not in (
+            _PROFILE_CONFIRMATION_ACCEPTED | _PROFILE_CONFIRMATION_REFUSED
+        ):
+            return None
+
+        self._context.add_user_message(user_message)
+        self._pending_profile_fact_promotion = None
+        self._last_profile_fact_candidates = ()
+        self._last_profile_fact_promotion_proposal = proposal
+        self._last_memory_candidates = ()
+        self._last_memory_promotion_proposal = None
+        self._pending_memory_promotion = None
+        self._last_intent = None
+        self._last_person_resolution = None
+
+        if normalized in _PROFILE_CONFIRMATION_REFUSED:
+            response = "D'accord, je n'ajoute pas cette information au profil."
+        elif (
+            self._person_context.active_person_id
+            != proposal.candidate.person_id
+        ):
+            response = PROFILE_PROMOTION_ERROR_MESSAGE
+        elif self._profile_fact_promotion_service is None:
+            response = PROFILE_PROMOTION_ERROR_MESSAGE
+        else:
+            try:
+                fact = self._profile_fact_promotion_service.apply_confirmed(
+                    proposal
+                )
+            except (DatabaseError, RepositoryError, ValueError):
+                response = PROFILE_PROMOTION_ERROR_MESSAGE
+            else:
+                if proposal.operation in {"update", "conflict"}:
+                    response = (
+                        f"Fait de profil corrigé : [#{fact.id}] "
+                        f"{fact.content}"
+                    )
+                else:
+                    response = (
+                        f"Fait de profil enregistré : [#{fact.id}] "
+                        f"{fact.content}"
+                    )
+
+        self._context.add_assistant_message(response)
+        return response
 
     def _select_memory_promotion_proposal(
         self,
@@ -584,6 +763,35 @@ def _recover_missing_journal_content(
     return Intent(
         name=intent.name,
         parameters=parameters,
+    )
+
+
+def _render_profile_fact_proposal(
+    proposal: ProfileFactPromotionProposal,
+) -> str:
+    """Présenter la décision de profil sans déclencher d'écriture."""
+    candidate = proposal.candidate
+    related = proposal.related_fact
+    if proposal.operation == "create":
+        return (
+            "Cette information pourrait être ajoutée au profil de "
+            f"l'interlocuteur actif : « {candidate.content} » "
+            "Veux-tu que je l'enregistre ? Réponds oui ou non."
+        )
+    if related is None:
+        raise ValueError("Profile promotion proposal is incomplete.")
+    if proposal.operation == "already_known":
+        return f"Ce fait figure déjà dans le profil [#{related.id}]."
+    if proposal.operation == "update":
+        return (
+            f"Cela ressemble à une correction du fait de profil [#{related.id}] "
+            f"« {related.content} ». Veux-tu le remplacer par "
+            f"« {candidate.content} » ? Réponds oui ou non."
+        )
+    return (
+        f"Cette information peut contredire le fait de profil [#{related.id}] "
+        f"« {related.content} ». Veux-tu le remplacer par "
+        f"« {candidate.content} » ? Réponds oui ou non."
     )
 
 

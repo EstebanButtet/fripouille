@@ -13,7 +13,8 @@ flux suivant sans mélanger les responsabilités::
                                       |-> client Ollama
                                       |-> registre d'actions
                                       |-> résolution de personne
-                                      `-> services de mémoire
+                                      |-> services de mémoire
+                                      `-> faits de profil contrôlés
 """
 
 from __future__ import annotations
@@ -36,6 +37,9 @@ from assistant_ia.intelligence.model_client import (
 from assistant_ia.intelligence.memory_candidates import (
     OllamaMemoryCandidateAnalyzer,
 )
+from assistant_ia.intelligence.profile_fact_candidates import (
+    OllamaProfileFactCandidateAnalyzer,
+)
 from assistant_ia.memory.errors import RepositoryError
 from assistant_ia.memory.journal_repository import JournalRepository
 from assistant_ia.memory.memory_repository import MemoryRepository
@@ -50,6 +54,8 @@ from assistant_ia.memory.task_repository import TaskRepository
 from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import DEFAULT_PERSON_ID
 from assistant_ia.people.person_repository import PersonRepository
+from assistant_ia.people.profile_fact_repository import ProfileFactRepository
+from assistant_ia.people.profile_promotion import ProfileFactPromotionService
 from assistant_ia.people.resolution import PersonResolutionService
 from assistant_ia.security.confirmation import ConfirmationHandler
 from assistant_ia.security.permissions import PermissionPolicy
@@ -89,7 +95,8 @@ def build_default_assistant(
     :class:`ApplicationInitializationError` si cette étape échoue.
 
     Lorsque ``model_client`` est fourni, les automatismes spécifiques à
-    Ollama (rappel et promotion de mémoire) ne sont pas ajoutés implicitement.
+    Ollama (rappel, mémoire et candidats de profil) ne sont pas ajoutés
+    implicitement.
     Cela maintient un client injecté maître de son comportement de test.
     """
     # Les validations précoces rendent les erreurs d'assemblage explicites.
@@ -172,6 +179,7 @@ def build_default_assistant(
     memory_repository = MemoryRepository(
         resolved_database
     )
+    profile_fact_repository = ProfileFactRepository(resolved_database)
 
     # Le registre est la frontière applicative qui autorise et valide les
     # actions. Le modèle ne reçoit jamais directement les repositories ni le
@@ -250,6 +258,16 @@ def build_default_assistant(
         ),
         memory_promotion_service=(
             MemoryPromotionService(memory_repository)
+            if model_client is None
+            else None
+        ),
+        profile_fact_candidate_analyzer=(
+            OllamaProfileFactCandidateAnalyzer()
+            if model_client is None
+            else None
+        ),
+        profile_fact_promotion_service=(
+            ProfileFactPromotionService(profile_fact_repository)
             if model_client is None
             else None
         ),

@@ -2,8 +2,8 @@
 
 ``SQLiteDatabase`` possède le chemin, ouvre des connexions transactionnelles,
 active les clés étrangères et gère les migrations de schéma. Les repositories
-de tâches, mémoire, journal et personnes utilisent cette infrastructure mais
-gardent leur SQL métier dans leurs propres modules.
+de tâches, mémoire, journal, personnes et faits de profil utilisent cette
+infrastructure mais gardent leur SQL métier dans leurs propres modules.
 
 Une transaction couvre chaque bloc ``with database.connect()`` : une sortie
 normale valide les écritures, tandis qu'une exception provoque leur annulation
@@ -28,7 +28,7 @@ DEFAULT_DATABASE_DIRECTORY_NAME = "assistant-ia"
 DEFAULT_DATABASE_FILENAME = "assistant_ia.db"
 
 _INITIAL_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 _SCHEMA_VERSION_COLUMNS = (
     ("id", "INTEGER", 0, 1),
@@ -63,6 +63,17 @@ _BUSINESS_TABLE_COLUMNS = {
         ("id", "INTEGER", 0, 1),
         ("display_name", "TEXT", 1, 0),
         ("created_at", "TEXT", 1, 0),
+    ),
+    "profile_facts": (
+        ("id", "INTEGER", 0, 1),
+        ("person_id", "INTEGER", 1, 0),
+        ("category", "TEXT", 1, 0),
+        ("content", "TEXT", 1, 0),
+        ("source", "TEXT", 1, 0),
+        ("source_text", "TEXT", 0, 0),
+        ("confidence", "REAL", 1, 0),
+        ("created_at", "TEXT", 1, 0),
+        ("updated_at", "TEXT", 1, 0),
     ),
 }
 
@@ -426,6 +437,53 @@ def _migrate_schema_3_to_4(
     )
 
 
+def _migrate_schema_4_to_5(
+    connection: sqlite3.Connection,
+) -> None:
+    """Ajouter les faits de profil sans relier les souvenirs aux personnes."""
+    connection.execute(
+        """
+        CREATE TABLE profile_facts (
+            id INTEGER PRIMARY KEY,
+            person_id INTEGER NOT NULL
+                REFERENCES persons(id),
+            category TEXT NOT NULL
+                CHECK (category IN (
+                    'preference',
+                    'communication_preference',
+                    'interest',
+                    'habit',
+                    'personal_fact'
+                )),
+            content TEXT NOT NULL
+                CHECK (length(trim(content)) > 0),
+            source TEXT NOT NULL
+                CHECK (source IN (
+                    'explicit_user',
+                    'conversation_analysis'
+                )),
+            source_text TEXT
+                CHECK (
+                    source_text IS NULL
+                    OR length(trim(source_text)) > 0
+                ),
+            confidence REAL NOT NULL
+                CHECK (confidence >= 0.0 AND confidence <= 1.0),
+            created_at TEXT NOT NULL
+                CHECK (length(trim(created_at)) > 0),
+            updated_at TEXT NOT NULL
+                CHECK (length(trim(updated_at)) > 0)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_profile_facts_person_category
+        ON profile_facts (person_id, category, id)
+        """
+    )
+
+
 def _ensure_default_person(
     connection: sqlite3.Connection,
 ) -> None:
@@ -513,6 +571,7 @@ _SCHEMA_MIGRATIONS = {
     1: _migrate_schema_1_to_2,
     2: _migrate_schema_2_to_3,
     3: _migrate_schema_3_to_4,
+    4: _migrate_schema_4_to_5,
 }
 
 

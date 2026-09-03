@@ -19,7 +19,7 @@ Pour une découverte pédagogique progressive du projet, lire
 
 | Fichier | Rôle |
 | --- | --- |
-| `src/assistant_ia/core/assistant.py` | Orchestration du message, des actions et de la promotion mémoire. |
+| `src/assistant_ia/core/assistant.py` | Orchestration du message, des actions et des promotions mémoire/profil. |
 | `src/assistant_ia/core/context.py` | Historique conversationnel en mémoire. |
 | `src/assistant_ia/intelligence/turn.py` | Séparation historique / tour courant. |
 | `src/assistant_ia/intelligence/model_client.py` | Client Ollama, interprétation puis génération. |
@@ -47,6 +47,10 @@ l'apprentissage et de l'état interne.
 | `src/assistant_ia/people/presentation.py` | Détection d'une présentation explicite. |
 | `src/assistant_ia/people/person_repository.py` | Registre SQLite minimal des personnes. |
 | `src/assistant_ia/people/resolution.py` | Résolution déterministe de la personne active. |
+| `src/assistant_ia/people/profile_models.py` | Faits de profil confirmés et candidats distincts. |
+| `src/assistant_ia/people/profile_fact_repository.py` | Persistance SQLite des faits, isolée par personne. |
+| `src/assistant_ia/people/profile_promotion.py` | Doublon, correction, conflit et promotion confirmée. |
+| `src/assistant_ia/intelligence/profile_fact_candidates.py` | Analyse Ollama bornée des candidats de profil. |
 
 ## Mémoire
 
@@ -100,7 +104,10 @@ variante firmware expérimentale dans un commit IA.
   `tests/test_identity_defaults.py`, `tests/test_identity_context.py`.
 - Personnes : `tests/test_people_context.py`,
   `tests/test_people_pipeline.py`, `tests/test_people_presentation.py`,
-  `tests/test_person_repository.py`, `tests/test_person_resolution.py`.
+  `tests/test_person_repository.py`, `tests/test_person_resolution.py`,
+  `tests/test_profile_fact_repository.py`,
+  `tests/test_profile_fact_candidates.py`,
+  `tests/test_profile_fact_promotion_pipeline.py`.
 - Mémoire : `tests/test_memory_repository.py`,
   `tests/test_memory_retrieval.py`,
   `tests/test_memory_promotion_pipeline.py`,
@@ -119,4 +126,5 @@ variante firmware expérimentale dans un commit IA.
 - Interface utilisateur : `runtime.py` + `interfaces/`.
 - Actions PC : `actions/` + `security/`.
 - Identité stable : `identity/`.
-- Profils sociaux : `people/`.
+- Faits de profil : `people/profile_models.py` +
+  `people/profile_fact_repository.py` + `people/profile_promotion.py`.

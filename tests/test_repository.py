@@ -428,6 +428,32 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 journal_entries,
             )
 
+    def _create_version_four_schema(
+        self,
+        *,
+        tasks: tuple[tuple[object, ...], ...] = (),
+        memories: tuple[tuple[int, str, str], ...] = (),
+        journal_entries: tuple[tuple[object, ...], ...] = (),
+    ) -> None:
+        """Create a populated v4 database through the real person migration."""
+        self._create_version_three_schema(
+            tasks=tasks,
+            memories=memories,
+            journal_entries=journal_entries,
+        )
+        with self.database.connect() as connection:
+            repository_module._migrate_schema_3_to_4(connection)
+            connection.execute(
+                "UPDATE schema_version SET version = 4 WHERE id = 1"
+            )
+            connection.execute(
+                """
+                INSERT INTO persons (id, display_name, created_at)
+                VALUES (?, ?, ?)
+                """,
+                (7, "Alice", "2026-08-07T04:00:00+00:00"),
+            )
+
     def _table_names(self) -> list[tuple[str]]:
         """Return all non-internal table names in deterministic order."""
         with self.database.connect() as connection:
@@ -484,6 +510,7 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 ("journal_entries",),
                 ("memories",),
                 ("persons",),
+                ("profile_facts",),
                 ("schema_version",),
                 ("tasks",),
             ],
@@ -791,9 +818,98 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 ("journal_entries",),
                 ("memories",),
                 ("persons",),
+                ("profile_facts",),
                 ("schema_version",),
                 ("tasks",),
             ],
+        )
+
+    def test_migrates_v4_to_v5_without_losing_existing_data(self) -> None:
+        """Profile facts migration should preserve every existing v4 domain."""
+        task = (
+            3, "Tâche v4", None, "pending",
+            "2026-08-07T01:00:00+00:00", None,
+        )
+        memory = (4, "Souvenir v4.", "2026-08-07T02:00:00+00:00")
+        journal = (
+            5, "Journal v4.", "2026-08-07",
+            "2026-08-07T03:00:00+00:00",
+        )
+        self._create_version_four_schema(
+            tasks=(task,), memories=(memory,), journal_entries=(journal,)
+        )
+
+        self.database.initialize()
+
+        with self.database.connect() as connection:
+            version = connection.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            stored_task = connection.execute(
+                "SELECT * FROM tasks WHERE id = 3"
+            ).fetchone()
+            stored_memory = connection.execute(
+                """
+                SELECT id, content, source, source_text, confidence,
+                       created_at, updated_at
+                FROM memories
+                WHERE id = 4
+                """
+            ).fetchone()
+            memory_columns = connection.execute(
+                "SELECT name FROM pragma_table_info('memories') ORDER BY cid"
+            ).fetchall()
+            stored_journal = connection.execute(
+                "SELECT content FROM journal_entries WHERE id = 5"
+            ).fetchone()
+            stored_person = connection.execute(
+                "SELECT display_name FROM persons WHERE id = 7"
+            ).fetchone()
+            facts = connection.execute(
+                "SELECT COUNT(*) FROM profile_facts"
+            ).fetchone()
+
+        self.assertEqual(version, (CURRENT_SCHEMA_VERSION,))
+        self.assertEqual(stored_task, task)
+        self.assertEqual(
+            stored_memory,
+            (
+                memory[0], memory[1], "legacy_explicit", None, 1.0,
+                memory[2], memory[2],
+            ),
+        )
+        self.assertEqual(
+            memory_columns,
+            [
+                ("id",), ("content",), ("source",), ("source_text",),
+                ("confidence",), ("created_at",), ("updated_at",),
+            ],
+        )
+        self.assertEqual(stored_journal, (journal[1],))
+        self.assertEqual(stored_person, ("Alice",))
+        self.assertEqual(facts, (0,))
+
+    def test_profile_facts_schema_has_person_foreign_key_and_index(self) -> None:
+        """The v5 table should enforce its subject and expose its scoped index."""
+        self.database.initialize()
+
+        with self.database.connect() as connection:
+            foreign_keys = connection.execute(
+                "PRAGMA foreign_key_list(profile_facts)"
+            ).fetchall()
+            indexes = connection.execute(
+                "PRAGMA index_list(profile_facts)"
+            ).fetchall()
+
+        self.assertTrue(
+            any(
+                row[2] == "persons" and row[3] == "person_id"
+                for row in foreign_keys
+            )
+        )
+        self.assertIn(
+            "idx_profile_facts_person_category",
+            {row[1] for row in indexes},
         )
 
     def test_initialize_does_not_duplicate_default_person(self) -> None:

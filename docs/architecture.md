@@ -62,7 +62,8 @@ An intent is therefore a proposal, not an executed action.
 | --- | --- | --- |
 | Identity | Immutable configuration describing Fripouille's stable identity | Implemented |
 | Conversation | Temporary, bounded session history | Implemented |
-| People | The active speaker for the current session | Minimal implementation |
+| People | Persistent person registry and the active speaker for the current session | Implemented through FRP-IA-04B |
+| Profile facts | Confirmed, person-scoped facts promoted from separate candidates | Implemented through FRP-IA-04C; no prompt injection yet |
 | Memory | Persistent user-confirmed facts plus contextual retrieval | Implemented |
 | Relationships | Persistent social profiles and relationship state | Not implemented |
 | Learning | Behavioral adaptation derived from experience | Not implemented |
@@ -72,8 +73,10 @@ An intent is therefore a proposal, not an executed action.
 | Physical interfaces | Presenters and controlled transports outside the cognitive core | Display prototype only |
 
 These boundaries are deliberate. In particular, a model response cannot
-mutate `AssistantIdentity`, and the current active-person context is not a
-substitute for FRP-IA-04 social profiles or relationships.
+mutate `AssistantIdentity`. A `ProfileFactCandidate` is not a truth or a
+`Memory`: the application supplies its resolved person, classifies the
+operation and requires confirmation before persistence. Relationships remain
+separate and unimplemented.
 
 ## Authority boundary
 

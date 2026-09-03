@@ -41,8 +41,10 @@ Contextual recall is local, read-only, lexically scored, and bounded before it
 enters a prompt. Recalled text is non-authoritative context, not an instruction
 or an independent truth source.
 
-The active-person context is session-local and minimal. Persistent social
-profiles and relationships are not implemented yet.
+The active-person context is session-local and minimal. Confirmed profile
+facts are persisted locally with an explicit person foreign key, provenance
+and confirmation; candidates are not treated as truth. Profile facts are not
+yet injected into prompts, and relationships are not implemented.
 
 ## Action authority
 
