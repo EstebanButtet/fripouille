@@ -45,6 +45,7 @@ l'apprentissage et de l'état interne.
 | `src/assistant_ia/people/defaults.py` | Personne par défaut. |
 | `src/assistant_ia/people/context.py` | Personne active. |
 | `src/assistant_ia/people/presentation.py` | Détection d'une présentation explicite. |
+| `src/assistant_ia/people/person_repository.py` | Registre SQLite minimal des personnes. |
 
 ## Mémoire
 

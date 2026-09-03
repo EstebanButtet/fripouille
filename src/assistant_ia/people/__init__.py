@@ -1,6 +1,6 @@
-"""Identité minimale de la personne active dans une conversation.
+"""Identité persistante minimale et personne active de la conversation.
 
-Ce paquet ne constitue pas FRP-IA-04 : il ne gère encore ni profils sociaux
-persistants ni relations. Il distingue seulement le locuteur courant du nom
-réservé de l'assistant.
+FRP-IA-04A ajoute uniquement le registre stable. Les profils sociaux,
+relations, alias avancés, rôles et rattachements mémoire restent hors de ce
+paquet à ce stade.
 """

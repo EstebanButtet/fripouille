@@ -18,6 +18,10 @@ from assistant_ia.memory.repository import (
     SQLiteDatabase,
     default_database_path,
 )
+from assistant_ia.people.defaults import (
+    DEFAULT_PERSON_ID,
+    DEFAULT_PERSON_NAME,
+)
 
 
 class SQLiteDatabasePathTests(unittest.TestCase):
@@ -382,6 +386,48 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 memories,
             )
 
+    def _create_version_three_schema(
+        self,
+        *,
+        tasks: tuple[tuple[object, ...], ...] = (),
+        memories: tuple[tuple[int, str, str], ...] = (),
+        journal_entries: tuple[tuple[object, ...], ...] = (),
+    ) -> None:
+        """Create a v3 database populated through the real v2 migration."""
+        self._create_version_two_schema(memories)
+
+        with self.database.connect() as connection:
+            repository_module._migrate_schema_2_to_3(connection)
+            connection.execute(
+                "UPDATE schema_version SET version = 3 WHERE id = 1"
+            )
+            connection.executemany(
+                """
+                INSERT INTO tasks (
+                    id,
+                    title,
+                    due_at,
+                    status,
+                    created_at,
+                    completed_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                tasks,
+            )
+            connection.executemany(
+                """
+                INSERT INTO journal_entries (
+                    id,
+                    content,
+                    entry_date,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                journal_entries,
+            )
+
     def _table_names(self) -> list[tuple[str]]:
         """Return all non-internal table names in deterministic order."""
         with self.database.connect() as connection:
@@ -437,6 +483,7 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
             [
                 ("journal_entries",),
                 ("memories",),
+                ("persons",),
                 ("schema_version",),
                 ("tasks",),
             ],
@@ -453,7 +500,7 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
         self.assertTrue(self._table_exists("journal_entries"))
 
     def test_migrates_empty_version_two_database(self) -> None:
-        """An empty v2 memory table should become the v3 schema."""
+        """An empty v2 memory table should reach the current schema."""
         self._create_version_two_schema()
 
         self.database.initialize()
@@ -473,7 +520,7 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 "SELECT COUNT(*) FROM memories"
             ).fetchone()
 
-        self.assertEqual(version, (3,))
+        self.assertEqual(version, (CURRENT_SCHEMA_VERSION,))
         self.assertEqual(
             columns,
             [
@@ -641,12 +688,95 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
             (CURRENT_SCHEMA_VERSION,),
         )
 
-    def test_initialize_is_idempotent(self) -> None:
-        """Repeated initialization should not alter a current schema."""
-        self.database.initialize()
+    def test_migrates_v3_to_v4_without_losing_existing_data(self) -> None:
+        """The person registry migration should preserve every v3 domain."""
+        task = (
+            3,
+            "Tâche existante",
+            None,
+            "pending",
+            "2026-08-07T01:00:00+00:00",
+            None,
+        )
+        memory = (
+            4,
+            "Souvenir existant.",
+            "2026-08-07T02:00:00+00:00",
+        )
+        journal_entry = (
+            5,
+            "Entrée existante.",
+            "2026-08-07",
+            "2026-08-07T03:00:00+00:00",
+        )
+        self._create_version_three_schema(
+            tasks=(task,),
+            memories=(memory,),
+            journal_entries=(journal_entry,),
+        )
+
         self.database.initialize()
 
         with self.database.connect() as connection:
+            version = connection.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            stored_task = connection.execute(
+                "SELECT * FROM tasks WHERE id = 3"
+            ).fetchone()
+            stored_memory = connection.execute(
+                """
+                SELECT
+                    id,
+                    content,
+                    source,
+                    source_text,
+                    confidence,
+                    created_at,
+                    updated_at
+                FROM memories
+                WHERE id = 4
+                """
+            ).fetchone()
+            stored_journal_entry = connection.execute(
+                "SELECT * FROM journal_entries WHERE id = 5"
+            ).fetchone()
+            default_person = connection.execute(
+                """
+                SELECT id, display_name
+                FROM persons
+                WHERE id = ?
+                """,
+                (DEFAULT_PERSON_ID,),
+            ).fetchone()
+
+        self.assertEqual(version, (CURRENT_SCHEMA_VERSION,))
+        self.assertEqual(stored_task, task)
+        self.assertEqual(
+            stored_memory,
+            (
+                memory[0],
+                memory[1],
+                "legacy_explicit",
+                None,
+                1.0,
+                memory[2],
+                memory[2],
+            ),
+        )
+        self.assertEqual(stored_journal_entry, journal_entry)
+        self.assertEqual(
+            default_person,
+            (DEFAULT_PERSON_ID, DEFAULT_PERSON_NAME),
+        )
+
+    def test_initialize_is_idempotent(self) -> None:
+        """Repeated initialization should not alter a current schema."""
+        self.database.initialize()
+        restarted_database = SQLiteDatabase(self.database_path)
+        restarted_database.initialize()
+
+        with restarted_database.connect() as connection:
             version_count = connection.execute(
                 """
                 SELECT COUNT(*)
@@ -660,10 +790,40 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
             [
                 ("journal_entries",),
                 ("memories",),
+                ("persons",),
                 ("schema_version",),
                 ("tasks",),
             ],
         )
+
+    def test_initialize_does_not_duplicate_default_person(self) -> None:
+        """Repeated storage initialization should retain one default row."""
+        self.database.initialize()
+
+        with self.database.connect() as connection:
+            initial_row = connection.execute(
+                """
+                SELECT id, display_name, created_at
+                FROM persons
+                WHERE id = ?
+                """,
+                (DEFAULT_PERSON_ID,),
+            ).fetchone()
+
+        restarted_database = SQLiteDatabase(self.database_path)
+        restarted_database.initialize()
+
+        with restarted_database.connect() as connection:
+            persons = connection.execute(
+                """
+                SELECT id, display_name, created_at
+                FROM persons
+                ORDER BY id
+                """
+            ).fetchall()
+
+        self.assertIsNotNone(initial_row)
+        self.assertEqual(persons, [initial_row])
 
     def test_migration_preserves_existing_data(self) -> None:
         """Migrating should not remove unrelated existing data."""

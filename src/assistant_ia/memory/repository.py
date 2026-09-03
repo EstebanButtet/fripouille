@@ -2,8 +2,8 @@
 
 ``SQLiteDatabase`` possède le chemin, ouvre des connexions transactionnelles,
 active les clés étrangères et gère les migrations de schéma. Les repositories
-de tâches, mémoire et journal utilisent cette infrastructure mais gardent leur
-SQL métier dans leurs propres modules.
+de tâches, mémoire, journal et personnes utilisent cette infrastructure mais
+gardent leur SQL métier dans leurs propres modules.
 
 Une transaction couvre chaque bloc ``with database.connect()`` : une sortie
 normale valide les écritures, tandis qu'une exception provoque leur annulation
@@ -19,11 +19,16 @@ from os import PathLike
 from pathlib import Path
 from typing import Iterator
 
+from assistant_ia.people.defaults import (
+    DEFAULT_PERSON_ID,
+    DEFAULT_PERSON_NAME,
+)
+
 DEFAULT_DATABASE_DIRECTORY_NAME = "assistant-ia"
 DEFAULT_DATABASE_FILENAME = "assistant_ia.db"
 
 _INITIAL_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 _SCHEMA_VERSION_COLUMNS = (
     ("id", "INTEGER", 0, 1),
@@ -52,6 +57,11 @@ _BUSINESS_TABLE_COLUMNS = {
         ("id", "INTEGER", 0, 1),
         ("content", "TEXT", 1, 0),
         ("entry_date", "TEXT", 1, 0),
+        ("created_at", "TEXT", 1, 0),
+    ),
+    "persons": (
+        ("id", "INTEGER", 0, 1),
+        ("display_name", "TEXT", 1, 0),
         ("created_at", "TEXT", 1, 0),
     ),
 }
@@ -193,6 +203,7 @@ class SQLiteDatabase:
                 schema_version = next_version
 
             _validate_current_business_schema(connection)
+            _ensure_default_person(connection)
 
 
 def _create_technical_schema(
@@ -398,6 +409,61 @@ def _migrate_schema_2_to_3(
     )
 
 
+def _migrate_schema_3_to_4(
+    connection: sqlite3.Connection,
+) -> None:
+    """Ajouter le registre minimal des personnes sans liaison sociale."""
+    connection.execute(
+        """
+        CREATE TABLE persons (
+            id INTEGER PRIMARY KEY,
+            display_name TEXT NOT NULL
+                CHECK (length(trim(display_name)) > 0),
+            created_at TEXT NOT NULL
+                CHECK (length(trim(created_at)) > 0)
+        )
+        """
+    )
+
+
+def _ensure_default_person(
+    connection: sqlite3.Connection,
+) -> None:
+    """Garantir l'identité persistante par défaut sans doublon de lancement."""
+    connection.execute(
+        """
+        INSERT OR IGNORE INTO persons (
+            id,
+            display_name,
+            created_at
+        )
+        VALUES (
+            ?,
+            ?,
+            strftime('%Y-%m-%dT%H:%M:%f+00:00', 'now')
+        )
+        """,
+        (
+            DEFAULT_PERSON_ID,
+            DEFAULT_PERSON_NAME,
+        ),
+    )
+
+    default_person_row = connection.execute(
+        """
+        SELECT display_name
+        FROM persons
+        WHERE id = ?
+        """,
+        (DEFAULT_PERSON_ID,),
+    ).fetchone()
+
+    if default_person_row != (DEFAULT_PERSON_NAME,):
+        raise DatabaseError(
+            "Default person registry entry is invalid."
+        )
+
+
 def _validate_current_business_schema(
     connection: sqlite3.Connection,
 ) -> None:
@@ -446,6 +512,7 @@ def _table_columns(
 _SCHEMA_MIGRATIONS = {
     1: _migrate_schema_1_to_2,
     2: _migrate_schema_2_to_3,
+    3: _migrate_schema_3_to_4,
 }
 
 

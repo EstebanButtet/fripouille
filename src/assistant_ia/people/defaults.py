@@ -1,7 +1,8 @@
 """Personne supposée présente par défaut au début d'une session.
 
-Cette valeur locale n'est pas un profil relationnel appris ; elle sert
-seulement à initialiser :class:`ActivePersonContext`.
+L'identifiant réservé est la clé stable du registre persistant. Le profil
+local reste sans données relationnelles et sert à initialiser
+:class:`ActivePersonContext`.
 """
 
 from __future__ import annotations
@@ -9,6 +10,7 @@ from __future__ import annotations
 from assistant_ia.people.models import PersonProfile
 
 
+DEFAULT_PERSON_ID = 1
 DEFAULT_PERSON_NAME = "Este"
 
 
