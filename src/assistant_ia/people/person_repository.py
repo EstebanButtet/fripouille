@@ -7,6 +7,7 @@ donnée de la personne et n'est jamais utilisé comme clé persistante.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import cast
@@ -108,6 +109,39 @@ class PersonRepository:
 
         return _person_from_row(person_row)
 
+    def find_persons_by_display_name(
+        self,
+        display_name: str,
+    ) -> tuple[Person, ...]:
+        """Trouver toutes les correspondances exactes après normalisation.
+
+        La comparaison retire uniquement les espaces extérieurs, normalise
+        Unicode en NFC puis applique ``casefold``. Elle ne rapproche jamais
+        deux orthographes différentes et ne choisit pas entre des homonymes.
+        """
+        matching_name = _normalize_display_name_for_matching(display_name)
+
+        with self._database.connect() as connection:
+            person_rows = connection.execute(
+                f"""
+                {_PERSON_SELECT_COLUMNS}
+                ORDER BY id
+                """
+            ).fetchall()
+
+        persons = tuple(
+            _person_from_row(person_row)
+            for person_row in person_rows
+        )
+
+        return tuple(
+            person
+            for person in persons
+            if _normalize_display_name_for_matching(
+                person.display_name
+            ) == matching_name
+        )
+
     def list_persons(
         self,
         limit: int = DEFAULT_PERSON_RESULT_LIMIT,
@@ -161,7 +195,10 @@ def _normalize_display_name(display_name: str) -> str:
             "Person display name must be a string."
         )
 
-    normalized_display_name = display_name.strip()
+    normalized_display_name = unicodedata.normalize(
+        "NFC",
+        display_name,
+    ).strip()
 
     if not normalized_display_name:
         raise ValueError(
@@ -169,6 +206,11 @@ def _normalize_display_name(display_name: str) -> str:
         )
 
     return normalized_display_name
+
+
+def _normalize_display_name_for_matching(display_name: str) -> str:
+    """Construire la clé exacte NFC et insensible à la casse d'un nom."""
+    return _normalize_display_name(display_name).casefold()
 
 
 def _validate_identifier(person_id: int) -> int:

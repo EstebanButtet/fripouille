@@ -131,6 +131,28 @@ class PersonRepositoryTests(unittest.TestCase):
 
         self.assertIsNone(repository.get_person(999))
 
+    def test_finds_name_with_nfc_casefold_and_outer_spaces(self) -> None:
+        repository = self._repository(self.first_time)
+        created = repository.create_person("Élodie")
+
+        matches = repository.find_persons_by_display_name(
+            "  e\u0301LODIE  "
+        )
+
+        self.assertEqual(matches, (created,))
+
+    def test_name_lookup_returns_every_homonym(self) -> None:
+        repository = self._repository(
+            self.first_time,
+            self.second_time,
+        )
+        first = repository.create_person("Alex")
+        second = repository.create_person("alex")
+
+        matches = repository.find_persons_by_display_name("ALEX")
+
+        self.assertEqual(matches, (first, second))
+
     def test_lists_default_and_created_people_by_id(self) -> None:
         repository = self._repository(
             self.first_time,

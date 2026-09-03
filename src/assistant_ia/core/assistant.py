@@ -1,9 +1,10 @@
 """Orchestration métier d'un tour de conversation de Fripouille.
 
 ``AssistantCore`` reçoit un message déjà acquis par une interface. Il gère
-l'historique temporaire, demande une réponse structurée au client de modèle,
-fait exécuter les intentions autorisées par ``ActionRegistry`` et orchestre
-l'analyse puis la promotion éventuelle d'un candidat mémoire.
+l'historique temporaire, résout les présentations explicites, demande une
+réponse structurée au client de modèle, fait exécuter les intentions
+autorisées par ``ActionRegistry`` et orchestre l'analyse puis la promotion
+éventuelle d'un candidat mémoire.
 
 Frontière d'autorité essentielle::
 
@@ -51,7 +52,13 @@ from assistant_ia.memory.promotion import (
 from assistant_ia.memory.repository import DatabaseError
 from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import build_default_person
+from assistant_ia.people.models import PersonProfile
 from assistant_ia.people.presentation import detect_presented_person
+from assistant_ia.people.resolution import (
+    PersonResolution,
+    PersonResolutionError,
+    PersonResolutionService,
+)
 
 ACTION_UNAVAILABLE_MESSAGE = (
     "J’ai identifié votre demande, mais aucune action n’a été exécutée. "
@@ -68,6 +75,11 @@ JOURNAL_CONTENT_SEPARATOR = " : "
 MEMORY_PROMOTION_ERROR_MESSAGE = (
     "La mémoire n'a pas pu être modifiée. "
     "Vérifiez les souvenirs enregistrés avant de réessayer."
+)
+
+PERSON_RESOLUTION_ERROR_MESSAGE = (
+    "La personne n'a pas pu être résolue. "
+    "L'interlocuteur actif n'a pas changé."
 )
 
 _MEMORY_CONFIRMATION_ACCEPTED = frozenset(
@@ -109,6 +121,9 @@ class AssistantCore:
         memory_promotion_service: (
             MemoryPromotionService | None
         ) = None,
+        person_resolution_service: (
+            PersonResolutionService | None
+        ) = None,
     ) -> None:
         """Créer le coeur avec les dépendances fournies ou leurs valeurs par défaut.
 
@@ -131,6 +146,18 @@ class AssistantCore:
             raise TypeError(
                 "Assistant person context must be an "
                 "ActivePersonContext."
+            )
+
+        if (
+            person_resolution_service is not None
+            and not isinstance(
+                person_resolution_service,
+                PersonResolutionService,
+            )
+        ):
+            raise TypeError(
+                "Assistant person resolution service must be a "
+                "PersonResolutionService."
             )
 
         # Cette identité est stable et sert seulement aux valeurs par défaut.
@@ -167,6 +194,8 @@ class AssistantCore:
         # Les objets d'analyse et de promotion sont séparés : le premier ne
         # persiste rien, le second applique les règles applicatives de mémoire.
         self._last_intent: Intent | None = None
+        self._person_resolution_service = person_resolution_service
+        self._last_person_resolution: PersonResolution | None = None
         self._memory_candidate_analyzer = memory_candidate_analyzer
         self._memory_promotion_service = memory_promotion_service
         self._last_memory_candidates: tuple[
@@ -198,6 +227,11 @@ class AssistantCore:
     def last_intent(self) -> Intent | None:
         """Retourner la dernière intention structurée identifiée."""
         return self._last_intent
+
+    @property
+    def last_person_resolution(self) -> PersonResolution | None:
+        """Retourner le dernier résultat déterministe de présentation."""
+        return self._last_person_resolution
 
     @property
     def last_memory_candidates(
@@ -240,6 +274,8 @@ class AssistantCore:
         # 2. Sans confirmation reconnue, le message commence un tour normal.
         # Les diagnostics du tour précédent sont remis à zéro avant l'analyse.
         self._pending_memory_promotion = None
+        self._last_intent = None
+        self._last_person_resolution = None
         self._last_memory_candidates = ()
         self._last_memory_promotion_proposal = None
         current_user_message = self._context.add_user_message(user_message)
@@ -250,15 +286,20 @@ class AssistantCore:
             user_message
         )
 
-        if presented_person is not None:
-            try:
-                self._person_context.set_active_person(
-                    presented_person
+        if (
+            presented_person is not None
+            and presented_person.name.casefold()
+            != self._person_context.assistant_name.casefold()
+        ):
+            resolution_response = self._resolve_person_presentation(
+                presented_person
+            )
+
+            if resolution_response is not None:
+                self._context.add_assistant_message(
+                    resolution_response
                 )
-            except ValueError:
-                # Le nom réservé de l'assistant ne peut jamais devenir
-                # l'identité de la personne active.
-                pass
+                return resolution_response
 
         # 3. Le client produit à la fois un texte et une intention structurée.
         # Le coeur ne fait confiance qu'aux objets déjà validés par ce client.
@@ -342,9 +383,66 @@ class AssistantCore:
         self._context.clear()
         self._person_context.reset()
         self._last_intent = None
+        self._last_person_resolution = None
         self._last_memory_candidates = ()
         self._last_memory_promotion_proposal = None
         self._pending_memory_promotion = None
+
+    def _resolve_person_presentation(
+        self,
+        presented_person: PersonProfile,
+    ) -> str | None:
+        """Résoudre puis appliquer une présentation avant l'appel modèle.
+
+        ``None`` autorise la poursuite normale du tour. Un texte retourné est
+        une réponse applicative finale : aucun LLM n'est alors consulté.
+        """
+        if self._person_resolution_service is None:
+            return None
+
+        try:
+            resolution = (
+                self._person_resolution_service.resolve_presentation(
+                    presented_person
+                )
+            )
+        except (
+            DatabaseError,
+            RepositoryError,
+            PersonResolutionError,
+        ):
+            return PERSON_RESOLUTION_ERROR_MESSAGE
+
+        self._last_person_resolution = resolution
+
+        if resolution.person is not None:
+            try:
+                self._person_context.set_active_persistent_person(
+                    resolution.person
+                )
+            except ValueError:
+                return PERSON_RESOLUTION_ERROR_MESSAGE
+
+            return None
+
+        if resolution.status == "ambiguous":
+            return (
+                "Plusieurs personnes enregistrées portent le nom "
+                f"« {presented_person.name} ». "
+                "L'interlocuteur actif n'a pas changé."
+            )
+
+        if resolution.status == "stale":
+            return (
+                "Le registre des personnes a changé pendant la "
+                "confirmation. L'interlocuteur actif n'a pas changé."
+            )
+
+        return (
+            "D'accord, je ne crée pas de nouvelle personne pour "
+            f"« {presented_person.name} ». "
+            "L'interlocuteur actif n'a pas changé."
+        )
 
     def _select_memory_promotion_proposal(
         self,
@@ -394,6 +492,7 @@ class AssistantCore:
         self._last_memory_candidates = ()
         self._last_memory_promotion_proposal = proposal
         self._last_intent = None
+        self._last_person_resolution = None
 
         if normalized_response in _MEMORY_CONFIRMATION_REFUSED:
             response = "D'accord, je ne conserverai pas cette information."

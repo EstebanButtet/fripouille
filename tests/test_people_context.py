@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timezone
 
 from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import build_default_person
-from assistant_ia.people.models import PersonProfile
+from assistant_ia.people.models import Person, PersonProfile
 
 
 class PersonProfileTests(unittest.TestCase):
@@ -36,6 +37,24 @@ class PersonProfileTests(unittest.TestCase):
 
 
 class ActivePersonContextTests(unittest.TestCase):
+    def test_tracks_persistent_default_person_id(self) -> None:
+        context = ActivePersonContext(
+            assistant_name="Fripouille",
+            default_person=Person(
+                id=1,
+                display_name="Este",
+                created_at=datetime(
+                    2026,
+                    8,
+                    7,
+                    tzinfo=timezone.utc,
+                ),
+            ),
+        )
+
+        self.assertEqual(context.default_person_id, 1)
+        self.assertEqual(context.active_person_id, 1)
+
     def test_starts_with_default_person(self) -> None:
         context = ActivePersonContext(
             assistant_name="Fripouille",
@@ -71,14 +90,28 @@ class ActivePersonContextTests(unittest.TestCase):
     def test_reset_restores_default_person(self) -> None:
         context = ActivePersonContext(
             assistant_name="Fripouille",
-            default_person=PersonProfile(
-                name="Este",
+            default_person=Person(
+                id=1,
+                display_name="Este",
+                created_at=datetime(
+                    2026,
+                    8,
+                    7,
+                    tzinfo=timezone.utc,
+                ),
             ),
         )
 
-        context.set_active_person(
-            PersonProfile(
-                name="Lucas",
+        context.set_active_persistent_person(
+            Person(
+                id=2,
+                display_name="Lucas",
+                created_at=datetime(
+                    2026,
+                    8,
+                    7,
+                    tzinfo=timezone.utc,
+                ),
             )
         )
         context.reset()
@@ -87,6 +120,27 @@ class ActivePersonContextTests(unittest.TestCase):
             context.active_person.name,
             "Este",
         )
+        self.assertEqual(context.active_person_id, 1)
+
+    def test_unresolved_profile_has_no_persistent_id(self) -> None:
+        context = ActivePersonContext(
+            assistant_name="Fripouille",
+            default_person=Person(
+                id=1,
+                display_name="Este",
+                created_at=datetime(
+                    2026,
+                    8,
+                    7,
+                    tzinfo=timezone.utc,
+                ),
+            ),
+        )
+
+        context.set_active_person(PersonProfile(name="Visiteur"))
+
+        self.assertEqual(context.active_person.name, "Visiteur")
+        self.assertIsNone(context.active_person_id)
 
     def test_assistant_name_is_exclusive(self) -> None:
         context = ActivePersonContext(

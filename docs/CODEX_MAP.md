@@ -46,6 +46,7 @@ l'apprentissage et de l'état interne.
 | `src/assistant_ia/people/context.py` | Personne active. |
 | `src/assistant_ia/people/presentation.py` | Détection d'une présentation explicite. |
 | `src/assistant_ia/people/person_repository.py` | Registre SQLite minimal des personnes. |
+| `src/assistant_ia/people/resolution.py` | Résolution déterministe de la personne active. |
 
 ## Mémoire
 
@@ -98,7 +99,8 @@ variante firmware expérimentale dans un commit IA.
 - Identité : `tests/test_identity_models.py`,
   `tests/test_identity_defaults.py`, `tests/test_identity_context.py`.
 - Personnes : `tests/test_people_context.py`,
-  `tests/test_people_pipeline.py`, `tests/test_people_presentation.py`.
+  `tests/test_people_pipeline.py`, `tests/test_people_presentation.py`,
+  `tests/test_person_repository.py`, `tests/test_person_resolution.py`.
 - Mémoire : `tests/test_memory_repository.py`,
   `tests/test_memory_retrieval.py`,
   `tests/test_memory_promotion_pipeline.py`,

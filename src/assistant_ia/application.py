@@ -12,6 +12,7 @@ flux suivant sans mélanger les responsabilités::
     interface -> AssistantRuntime -> AssistantCore
                                       |-> client Ollama
                                       |-> registre d'actions
+                                      |-> résolution de personne
                                       `-> services de mémoire
 """
 
@@ -35,6 +36,7 @@ from assistant_ia.intelligence.model_client import (
 from assistant_ia.intelligence.memory_candidates import (
     OllamaMemoryCandidateAnalyzer,
 )
+from assistant_ia.memory.errors import RepositoryError
 from assistant_ia.memory.journal_repository import JournalRepository
 from assistant_ia.memory.memory_repository import MemoryRepository
 from assistant_ia.memory.promotion import MemoryPromotionService
@@ -46,7 +48,9 @@ from assistant_ia.memory.repository import (
 )
 from assistant_ia.memory.task_repository import TaskRepository
 from assistant_ia.people.context import ActivePersonContext
-from assistant_ia.people.defaults import build_default_person
+from assistant_ia.people.defaults import DEFAULT_PERSON_ID
+from assistant_ia.people.person_repository import PersonRepository
+from assistant_ia.people.resolution import PersonResolutionService
 from assistant_ia.security.confirmation import ConfirmationHandler
 from assistant_ia.security.permissions import PermissionPolicy
 from assistant_ia.runtime import (
@@ -144,7 +148,17 @@ def build_default_assistant(
             )
         )
         resolved_database.initialize()
-    except DatabaseError as error:
+
+        person_repository = PersonRepository(resolved_database)
+        default_persistent_person = person_repository.get_person(
+            DEFAULT_PERSON_ID
+        )
+
+        if default_persistent_person is None:
+            raise RepositoryError(
+                "Default persistent person does not exist."
+            )
+    except (DatabaseError, RepositoryError) as error:
         raise ApplicationInitializationError(
             "The assistant database could not be initialized."
         ) from error
@@ -192,7 +206,7 @@ def build_default_assistant(
         if person_context is not None
         else ActivePersonContext(
             assistant_name=resolved_identity.name,
-            default_person=build_default_person(),
+            default_person=default_persistent_person,
         )
     )
 
@@ -225,6 +239,10 @@ def build_default_assistant(
         context=context,
         action_registry=action_registry,
         person_context=resolved_person_context,
+        person_resolution_service=PersonResolutionService(
+            person_repository,
+            confirmation_handler=confirmation_handler,
+        ),
         memory_candidate_analyzer=(
             OllamaMemoryCandidateAnalyzer()
             if model_client is None

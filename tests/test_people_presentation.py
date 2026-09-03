@@ -1,13 +1,18 @@
 ﻿from __future__ import annotations
 
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from assistant_ia.core.assistant import AssistantCore
 from assistant_ia.intelligence.intent import Intent
 from assistant_ia.intelligence.response import ModelResponse
+from assistant_ia.memory.repository import SQLiteDatabase
 from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.models import PersonProfile
+from assistant_ia.people.person_repository import PersonRepository
 from assistant_ia.people.presentation import detect_presented_person
+from assistant_ia.people.resolution import PersonResolutionService
 
 
 class RecordingModelClient:
@@ -37,6 +42,36 @@ class RecordingModelClient:
 
 
 class PersonPresentationTests(unittest.TestCase):
+    def _build_assistant_with_existing_person(
+        self,
+        display_name: str,
+    ) -> tuple[AssistantCore, ActivePersonContext, RecordingModelClient]:
+        temporary_directory = TemporaryDirectory()
+        self.addCleanup(temporary_directory.cleanup)
+        database = SQLiteDatabase(
+            Path(temporary_directory.name) / "assistant.db"
+        )
+        database.initialize()
+        repository = PersonRepository(database)
+        repository.create_person(display_name)
+        default_person = repository.get_person(1)
+
+        if default_person is None:
+            raise AssertionError("Default person was not initialized.")
+
+        person_context = ActivePersonContext(
+            assistant_name="Fripouille",
+            default_person=default_person,
+        )
+        model_client = RecordingModelClient(person_context)
+        assistant = AssistantCore(
+            model_client=model_client,
+            person_context=person_context,
+            person_resolution_service=PersonResolutionService(repository),
+        )
+
+        return assistant, person_context, model_client
+
     def test_detects_moi_cest(self) -> None:
         person = detect_presented_person(
             "Salut, moi c'est Lucas."
@@ -85,18 +120,12 @@ class PersonPresentationTests(unittest.TestCase):
         )
 
     def test_core_switches_before_model_call(self) -> None:
-        person_context = ActivePersonContext(
-            assistant_name="Fripouille",
-            default_person=PersonProfile(
-                name="Este",
-            ),
-        )
-        model_client = RecordingModelClient(
-            person_context
-        )
-        assistant = AssistantCore(
-            model_client=model_client,
-            person_context=person_context,
+        (
+            assistant,
+            person_context,
+            model_client,
+        ) = self._build_assistant_with_existing_person(
+            "Lucas"
         )
 
         assistant.process_message(
@@ -107,6 +136,7 @@ class PersonPresentationTests(unittest.TestCase):
             person_context.active_person.name,
             "Lucas",
         )
+        self.assertEqual(person_context.active_person_id, 2)
         self.assertEqual(
             model_client.observed_person_names,
             ["Lucas"],
@@ -124,18 +154,12 @@ class PersonPresentationTests(unittest.TestCase):
     def test_name_question_does_not_replace_active_person(
         self,
     ) -> None:
-        person_context = ActivePersonContext(
-            assistant_name="Fripouille",
-            default_person=PersonProfile(
-                name="Este",
-            ),
-        )
-        model_client = RecordingModelClient(
-            person_context
-        )
-        assistant = AssistantCore(
-            model_client=model_client,
-            person_context=person_context,
+        (
+            assistant,
+            person_context,
+            model_client,
+        ) = self._build_assistant_with_existing_person(
+            "Lucas"
         )
 
         assistant.process_message(
