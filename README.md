@@ -22,8 +22,9 @@ deterministic rules, requests confirmation when required, and decides whether
 an action may run.
 
 The current assistant includes a stable identity, bounded conversation
-context, a minimal active-person context, local persistence for tasks, journal
-entries and memories, and an allowlisted Windows application launcher.
+context, persistent people and social context, local persistence for tasks,
+journal entries, memories and behavioral-learning foundations, plus an
+allowlisted Windows application launcher.
 
 ## Why this project?
 
@@ -44,9 +45,10 @@ responsible for effects.
 | Terminal interface | Functional | Historical and diagnostic interface |
 | tkinter interface | Prototype | Provisional Windows chat window |
 | Identity | Functional | Stable, immutable Fripouille identity |
-| People | Functional | Minimal active-person context; no persistent social profiles |
+| People | Functional | Persistent registry, controlled profile facts, relationships and observations |
 | Tasks, journal and manual memory | Functional | Local SQLite repositories and validated actions |
 | Contextual and automatic memory | Functional | Retrieval, candidates, controlled promotion and correction |
+| Behavioral learning | Functional foundation | Explicit experiences and sourced lesson candidates; no automatic rule |
 | Windows application launching | Functional | Allowlist, permission policy, confirmation, no shell |
 | PC-to-ESP32 display path | Prototype | Tested software layers and associated firmware; no end-to-end hardware claim |
 | Complete mobile robot | Roadmap | Developed as a separate robotics direction |
@@ -63,6 +65,7 @@ flowchart TB
     C --> I[Stable identity]
     C --> P[Active person context]
     C --> M[Memory services]
+    C --> B[Behavioral learning service]
     C --> L[Intelligence / local Ollama]
     C --> A[Action registry]
     A --> S[Validation, permissions, confirmation]
@@ -74,9 +77,9 @@ flowchart TB
 ```
 
 The main flow is `interface -> AssistantRuntime -> AssistantCore ->
-intelligence/actions`. Identity, conversation, people, memory, future
-relationships and learning, internal state, roles, actions, and physical
-interfaces remain separate responsibilities. See
+intelligence/actions`. Identity, conversation, people, memory, behavioral
+learning, future internal state, roles, actions, and physical interfaces
+remain separate responsibilities. See
 [the architecture document](docs/architecture.md) for the detailed boundaries.
 
 ## Embodiment
@@ -153,7 +156,7 @@ The default database is created outside the repository under
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
-The current repository state passes **561 tests**. This count describes the
+The current repository state passes **681 tests**. This count describes the
 present revision and will evolve with the project.
 
 ## Repository guide
@@ -173,9 +176,9 @@ present revision and will evolve with the project.
 
 ## Roadmap
 
-The completed baseline covers FRP-IA-00 through FRP-IA-03, including the
-FRP-IA-02B GUI and the FRP-IA-03 contextual-memory series. The next planned
-stages are profiles and relationships, behavioral learning, experience
+The completed baseline covers FRP-IA-00 through FRP-IA-05, including the
+FRP-IA-02B GUI, contextual memory, persistent people/social context and
+behavioral-learning foundations. The next planned stages are experience
 feedback, consolidation, internal state, voice, face and expressions, social
 vision, roles and professions, and cognitive integration.
 

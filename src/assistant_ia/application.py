@@ -14,7 +14,8 @@ flux suivant sans mélanger les responsabilités::
                                       |-> registre d'actions
                                       |-> résolution de personne
                                       |-> services de mémoire
-                                      `-> contexte social borné
+                                      |-> contexte social borné
+                                      `-> apprentissage explicite
 """
 
 from __future__ import annotations
@@ -40,6 +41,8 @@ from assistant_ia.intelligence.memory_candidates import (
 from assistant_ia.intelligence.profile_fact_candidates import (
     OllamaProfileFactCandidateAnalyzer,
 )
+from assistant_ia.learning.repository import BehavioralLearningRepository
+from assistant_ia.learning.service import BehavioralLearningService
 from assistant_ia.memory.errors import RepositoryError
 from assistant_ia.memory.journal_repository import JournalRepository
 from assistant_ia.memory.memory_repository import MemoryRepository
@@ -280,6 +283,10 @@ def build_default_assistant(
             ProfileFactPromotionService(profile_fact_repository)
             if model_client is None
             else None
+        ),
+        behavioral_learning_service=BehavioralLearningService(
+            BehavioralLearningRepository(resolved_database),
+            resolved_person_context,
         ),
     )
 

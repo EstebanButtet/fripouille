@@ -9,9 +9,9 @@ interface -> AssistantRuntime -> AssistantCore -> intelligence / actions
 ```
 
 `application.py` is the composition root. It creates the concrete Ollama
-client, SQLite repositories, identity and person contexts, memory services,
-action registry, permission policy, and Windows adapters used by the default
-runtime.
+client, SQLite repositories, identity and person contexts, memory and
+behavioral-learning services, action registry, permission policy, and Windows
+adapters used by the default runtime.
 
 ## Layers and responsibilities
 
@@ -24,6 +24,7 @@ runtime.
 | Actions | Match a closed intent name, validate parameters, and invoke a registered handler |
 | Security | Resolve allow, confirmation-required, or deny decisions |
 | Memory | Persist tasks, journal entries and memories; retrieve and promote memory safely |
+| Learning | Persist inspectable experiences and sourced lesson candidates without consolidation |
 | High-level adapters | Launch allowlisted Windows applications or present text through a framed display protocol |
 
 The core depends on protocols and domain services rather than directly on a
@@ -47,6 +48,11 @@ terminal or tkinter
     -> user-facing presentation and separate diagnostics
 ```
 
+No behavioral experience is captured automatically by this pipeline in
+FRP-IA-05. `BehavioralLearningService` is an explicit application entry point
+for a caller that already owns a verified context, objective, strategy and
+result. It is not exposed as an Ollama intent or analyzer.
+
 Conversation and executable-action paths are exclusive for one interpreted
 turn. Recent conversation history is bounded and separated from the current
 message. Retrieved memories are local, read-only context; they do not become
@@ -66,7 +72,7 @@ An intent is therefore a proposal, not an executed action.
 | Profile facts | Confirmed, person-scoped facts promoted from separate candidates | Implemented and bounded in active-person context |
 | Memory | Confirmed memories, optional person links and scoped contextual retrieval | Implemented through FRP-IA-04D |
 | Relationships | Optional bounded relationship and unconfirmed observations per person | Implemented and bounded in active-person context |
-| Learning | Behavioral adaptation derived from experience | Not implemented |
+| Learning | Inspectable experiences and sourced lesson candidates, without stable rules | Foundations implemented through FRP-IA-05 |
 | Internal state | Persistent or evolving assistant state distinct from identity | Not implemented |
 | Roles | Future contextual roles and professions, distinct from the identity's descriptive role field | Not implemented |
 | Actions | Registered deterministic capabilities with validated parameters | Implemented |
@@ -110,12 +116,19 @@ allowlist entry before `subprocess` is called without a shell.
 Hardware receives only commands already constructed by controlled software.
 The LLM has no GPIO, PWM, motor, serial-byte, or raw display API.
 
+A future ROB adapter may return an application-validated high-level result
+with an operation reference, final state, duration, error, collision and
+success information. FRP-IA-05 can retain the resulting description and
+structured provenance after such an adapter exists; it does not implement ROB
+or raw signal processing for vision, EEG or EMG.
+
 ## Persistence and memory
 
 `SQLiteDatabase` owns connection lifecycle, transactions, schema checks, and
 migrations. Domain repositories own their SQL for tasks, journal entries,
 memories, people, profile facts, memory/person links, bounded relationships,
-and unconfirmed observations. The current schema version is 7.
+unconfirmed observations, behavioral experiences and lesson candidates. The
+current schema version is 8.
 
 `PersonRelationship` has at most one row per persistent person and contains
 only bounded familiarity and conversational interaction-style dimensions. It
@@ -136,6 +149,31 @@ non-persistent candidates with source evidence. `MemoryPromotionService`
 compares a candidate with existing memories and returns a proposal; the core
 handles required confirmation before a repository write. Contextual retrieval
 uses bounded, inspectable lexical scoring.
+
+## Behavioral learning foundations
+
+`BehavioralExperience` is a completed, inspectable record of context,
+objective, attempted strategy, result and optional minimal evaluation. Its
+`ExperienceProvenance` keeps a closed source type plus source reference and/or
+exact source text where required. An experience may be global or carry a
+foreign key to a persistent person selected through `ActivePersonContext`.
+
+`BehavioralLessonCandidate` is deliberately weaker than a rule. It records a
+context pattern, proposed strategy and rationale, and its many-to-many source
+links point to the exact experiences used as evidence. One experience may
+support a candidate, but neither one nor many experiences trigger automatic
+creation, confirmation, prompt injection or behavior changes.
+
+Both records can be inspected, corrected, invalidated with a reason and
+deleted. An experience that still supports a candidate cannot be deleted;
+the candidate must first be removed so provenance is never silently broken.
+Person-scoped list operations use an exact application-resolved identifier and
+never mix another person's rows or global rows.
+
+FRP-IA-06 remains responsible for richer feedback and outcome evaluation.
+FRP-IA-07 remains responsible for comparison, contradiction handling,
+consolidation, validation/rejection and any future stable behavioral rule.
+Identity, roles and internal state have no dependency on the learning models.
 
 ## Interfaces and embodiment
 

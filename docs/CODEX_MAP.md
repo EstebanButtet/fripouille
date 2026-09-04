@@ -68,6 +68,18 @@ l'apprentissage et de l'état interne.
 | `src/assistant_ia/intelligence/memory_candidates.py` | Analyse Ollama des candidats. |
 | `src/assistant_ia/memory/repository.py` | Connexion, schéma et chemin SQLite partagé. |
 
+## Apprentissage comportemental
+
+| Fichier | Rôle |
+| --- | --- |
+| `src/assistant_ia/learning/models.py` | Expériences, provenance structurée et leçons candidates sans règle confirmée. |
+| `src/assistant_ia/learning/repository.py` | Persistance, traçabilité, correction, invalidation et suppression contrôlée. |
+| `src/assistant_ia/learning/service.py` | Portée applicative globale ou liée à la personne active résolue. |
+
+FRP-IA-05 ne déclenche aucun apprentissage automatique et n'injecte aucune
+leçon dans le prompt. L'évaluation approfondie et la consolidation restent
+respectivement réservées à FRP-IA-06 et FRP-IA-07.
+
 ## Actions et sécurité
 
 | Fichier | Rôle |
@@ -139,5 +151,7 @@ variante firmware expérimentale dans un commit IA.
   `people/profile_fact_repository.py` + `people/profile_promotion.py`.
 - Relations et observations : `people/social_models.py` +
   `people/relationship_repository.py` + `people/observation_repository.py`.
+- Apprentissage comportemental : `learning/models.py` +
+  `learning/repository.py` + `learning/service.py`.
 - Contexte social du prompt : `people/social_context.py` +
   `intelligence/prompt.py` + `intelligence/model_client.py`.

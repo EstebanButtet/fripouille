@@ -3,7 +3,7 @@
 Ce guide accompagne une personne qui connaît les bases de Python mais découvre
 les dataclasses, les protocoles, les repositories et une architecture en
 couches. Il ne décrit pas un projet futur : il suit le code présent après
-FRP-IA-03 et FRP-IA-02B. FRP-IA-04 n'a pas commencé.
+FRP-IA-03, FRP-IA-04, FRP-IA-05 et FRP-IA-02B.
 
 La meilleure méthode n'est pas de lire les fichiers par ordre alphabétique.
 Suivez d'abord un message de l'interface jusqu'à sa réponse, puis ouvrez les
@@ -208,7 +208,25 @@ requête, pas la vérité ou l'importance universelle du souvenir. Le rappel est
 en lecture seule et les budgets du prompt limitent le nombre et la taille des
 souvenirs injectés.
 
-## Niveau 4 — comprendre les actions et la sécurité
+## Niveau 4 — comprendre l'apprentissage comportemental
+
+Ordre conseillé :
+
+1. `src/assistant_ia/learning/models.py`
+2. `src/assistant_ia/learning/repository.py`
+3. `src/assistant_ia/learning/service.py`
+
+Une `BehavioralExperience` n'est ni un souvenir ni une observation sociale :
+elle décrit une stratégie tentée dans un contexte et son résultat. Sa
+provenance est structurée et sa portée est soit globale, soit celle d'une
+personne persistante déjà résolue par l'application.
+
+Une `BehavioralLessonCandidate` cite au moins une expérience source. Même
+ainsi, elle ne constitue jamais une règle confirmée. FRP-IA-05 ne l'injecte
+pas dans les prompts et ne la crée pas automatiquement ; FRP-IA-06 et 07
+porteront respectivement l'évaluation approfondie et la consolidation.
+
+## Niveau 5 — comprendre les actions et la sécurité
 
 Lisez :
 
@@ -237,7 +255,7 @@ JSON Ollama
 l'application. Connaître un nom d'intention ne suffit pas à rendre sa capacité
 disponible. Les capacités futures restent annoncées comme absentes.
 
-## Niveau 5 — comprendre identité et personne active
+## Niveau 6 — comprendre identité et personne active
 
 Lisez :
 
@@ -254,9 +272,10 @@ Une réponse du modèle ne la fait jamais évoluer.
 
 `ActivePersonContext` répond à une question beaucoup plus petite : « qui parle
 dans cette session ? ». Une présentation explicite peut changer ce nom jusqu'au
-prochain reset. Il ne s'agit pas encore de profils ou relations FRP-IA-04.
+prochain reset. Les profils, relations et observations de FRP-IA-04 sont
+persistés dans des modèles séparés et ne modifient pas l'identité.
 
-## Niveau 6 — comprendre les interfaces et le hardware
+## Niveau 7 — comprendre les interfaces et le hardware
 
 Pour la GUI :
 
@@ -338,8 +357,8 @@ liste directement.
 La documentation du code actuel ne doit pas transformer la feuille de route en
 fonctionnalités existantes :
 
-- FRP-IA-04 profils et relations : non commencé ;
-- FRP-IA-05 apprentissage comportemental : futur ;
+- FRP-IA-04 profils et relations : terminé ;
+- FRP-IA-05 fondations de l'apprentissage comportemental : terminé ;
 - FRP-IA-06 retour d'expérience : futur ;
 - FRP-IA-07 consolidation : futur ;
 - FRP-IA-08 état interne : futur ;

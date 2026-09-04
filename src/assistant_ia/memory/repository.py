@@ -2,9 +2,9 @@
 
 ``SQLiteDatabase`` possède le chemin, ouvre des connexions transactionnelles,
 active les clés étrangères et gère les migrations de schéma. Les repositories
-de tâches, mémoire, journal, personnes, faits de profil et associations
-utilisent cette infrastructure mais gardent leur SQL métier dans leurs propres
-modules.
+de tâches, mémoire, journal, personnes, faits de profil, associations et
+apprentissage utilisent cette infrastructure mais gardent leur SQL métier
+dans leurs propres modules.
 
 Une transaction couvre chaque bloc ``with database.connect()`` : une sortie
 normale valide les écritures, tandis qu'une exception provoque leur annulation

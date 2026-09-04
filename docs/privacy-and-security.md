@@ -10,7 +10,8 @@ The default model client sends requests to Ollama at
 `http://localhost:11434` and uses `qwen3.5:9b`. The default application does
 not configure a cloud model endpoint.
 
-Tasks, journal entries, and memories are stored in a SQLite database at:
+Tasks, journal entries, memories, people data and behavioral-learning records
+are stored in a SQLite database at:
 
 ```text
 %LOCALAPPDATA%\assistant-ia\assistant_ia.db
@@ -43,8 +44,9 @@ or an independent truth source.
 
 The active-person context is session-local and minimal. Confirmed profile
 facts are persisted locally with an explicit person foreign key, provenance
-and confirmation; candidates are not treated as truth. Profile facts are not
-yet injected into prompts, and relationships are not implemented.
+and confirmation; candidates are not treated as truth. Profile facts,
+relationships and observations enter only the bounded social context for the
+active person.
 
 Memory/person associations are explicit application data, never name matches
 or model-selected identifiers. Historical memories remain unassigned. During
@@ -63,6 +65,25 @@ person. It contains at most eight confirmed profile facts (300 characters each,
 and three recent observations (300 characters each, 600 total). Identifiers and
 raw source evidence are omitted. Each source has a separate non-authoritative
 prompt section, and memory retains its own independent limits.
+
+## Behavioral learning policy
+
+Behavioral learning is separate from memories, profile facts and social
+observations. FRP-IA-05 stores only explicit experiences and sourced lesson
+candidates. It defines no confirmed behavioral rule, automatic promotion,
+confidence threshold, role, mood or identity mutation.
+
+The default conversation and action pipelines write no learning record. An
+application caller must invoke `BehavioralLearningService` explicitly. For a
+person-scoped record, that service obtains the persistent person identifier
+from `ActivePersonContext`; no model output supplies it. Global records and
+person records use distinct list operations, and lesson sources must all
+belong to one exact scope.
+
+Provenance uses a closed source type and retains a reference or exact source
+text when required. Experiences and candidates can be corrected, invalidated
+with an inspectable reason, and deleted. A source experience cannot be deleted
+while a lesson candidate still cites it.
 
 ## Action authority
 

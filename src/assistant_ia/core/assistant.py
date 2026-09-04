@@ -4,7 +4,8 @@
 l'historique temporaire, résout les présentations explicites, demande une
 réponse structurée au client de modèle, fait exécuter les intentions
 autorisées par ``ActionRegistry`` et orchestre l'analyse puis les promotions
-éventuelles de candidats mémoire ou profil.
+éventuelles de candidats mémoire ou profil. Le service d'apprentissage exposé
+reste explicite et n'observe pas automatiquement ce pipeline.
 
 Frontière d'autorité essentielle::
 
@@ -46,6 +47,7 @@ from assistant_ia.intelligence.model_client import (
     OllamaModelClient,
 )
 from assistant_ia.intelligence.response import ModelResponse
+from assistant_ia.learning.service import BehavioralLearningService
 from assistant_ia.memory.models import MemoryCandidate
 from assistant_ia.memory.errors import RepositoryError
 from assistant_ia.memory.promotion import (
@@ -149,6 +151,9 @@ class AssistantCore:
         person_resolution_service: (
             PersonResolutionService | None
         ) = None,
+        behavioral_learning_service: (
+            BehavioralLearningService | None
+        ) = None,
     ) -> None:
         """Créer le coeur avec les dépendances fournies ou leurs valeurs par défaut.
 
@@ -183,6 +188,18 @@ class AssistantCore:
             raise TypeError(
                 "Assistant person resolution service must be a "
                 "PersonResolutionService."
+            )
+
+        if (
+            behavioral_learning_service is not None
+            and not isinstance(
+                behavioral_learning_service,
+                BehavioralLearningService,
+            )
+        ):
+            raise TypeError(
+                "Assistant behavioral learning service must be a "
+                "BehavioralLearningService."
             )
 
         # Cette identité est stable et sert seulement aux valeurs par défaut.
@@ -243,6 +260,7 @@ class AssistantCore:
         self._pending_profile_fact_promotion: (
             ProfileFactPromotionProposal | None
         ) = None
+        self._behavioral_learning_service = behavioral_learning_service
 
     @property
     def context(self) -> ConversationContext:
@@ -258,6 +276,13 @@ class AssistantCore:
     def action_registry(self) -> ActionRegistry:
         """Retourner le registre contrôlé des actions exécutables."""
         return self._action_registry
+
+    @property
+    def behavioral_learning_service(
+        self,
+    ) -> BehavioralLearningService | None:
+        """Retourner le point d'entrée explicite, sans apprentissage automatique."""
+        return self._behavioral_learning_service
 
     @property
     def last_intent(self) -> Intent | None:
