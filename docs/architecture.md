@@ -65,7 +65,7 @@ An intent is therefore a proposal, not an executed action.
 | People | Persistent person registry and the active speaker for the current session | Implemented through FRP-IA-04B |
 | Profile facts | Confirmed, person-scoped facts promoted from separate candidates | Implemented through FRP-IA-04C; no prompt injection yet |
 | Memory | Confirmed memories, optional person links and scoped contextual retrieval | Implemented through FRP-IA-04D |
-| Relationships | Persistent social profiles and relationship state | Not implemented |
+| Relationships | Optional bounded relationship and unconfirmed observations per person | Implemented through FRP-IA-04E; no prompt injection yet |
 | Learning | Behavioral adaptation derived from experience | Not implemented |
 | Internal state | Persistent or evolving assistant state distinct from identity | Not implemented |
 | Roles | Future contextual roles and professions, distinct from the identity's descriptive role field | Not implemented |
@@ -76,7 +76,7 @@ These boundaries are deliberate. In particular, a model response cannot
 mutate `AssistantIdentity`. A `ProfileFactCandidate` is not a truth or a
 `Memory`: the application supplies its resolved person, classifies the
 operation and requires confirmation before persistence. Relationships remain
-separate and unimplemented.
+separate from identity and confirmed profile facts.
 
 `Memory` remains independent from `Person`. A `MemoryPersonLink` records that
 a person is an explicit subject of a memory; no displayed name is resolved by
@@ -114,8 +114,14 @@ The LLM has no GPIO, PWM, motor, serial-byte, or raw display API.
 
 `SQLiteDatabase` owns connection lifecycle, transactions, schema checks, and
 migrations. Domain repositories own their SQL for tasks, journal entries,
-memories, people, profile facts, and memory/person links. The current schema
-version is 6.
+memories, people, profile facts, memory/person links, bounded relationships,
+and unconfirmed observations. The current schema version is 7.
+
+`PersonRelationship` has at most one row per persistent person and contains
+only bounded familiarity and conversational interaction-style dimensions. It
+is absent by default and has no security authority. `Observation` records a
+categorized, sourced, confidence-bearing signal with the explicit status
+`unconfirmed`; it never becomes a `ProfileFact` automatically.
 
 Manual memory actions are explicit. Automatic analysis first creates
 non-persistent candidates with source evidence. `MemoryPromotionService`

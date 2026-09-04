@@ -24,16 +24,16 @@ not proof that a complete robot has been delivered.
 
 ## Current position
 
-The current branch includes FRP-IA-04A through 04D: persistent people,
+The current branch includes FRP-IA-04A through 04E: persistent people,
 deterministic active-person resolution, controlled profile facts, and
-inspectable memory/person associations with scoped anti-leak retrieval.
-Profile facts are still not injected into prompts.
+inspectable memory/person associations, bounded relationships and explicitly
+unconfirmed observations. Social context is still not injected into prompts.
 
 ## Planned milestones
 
 | Milestone | Direction | Status |
 | --- | --- | --- |
-| FRP-IA-04 | Persistent people, controlled profile facts and person-scoped memories; later sub-milestones cover richer context and relationships | In progress through FRP-IA-04D |
+| FRP-IA-04 | Persistent people, profiles, person-scoped memories, relationships and bounded social context | In progress through FRP-IA-04E |
 | FRP-IA-05 | Behavioral learning kept separate from permanent identity | Future |
 | FRP-IA-06 | Experience feedback and explicit evaluation of outcomes | Future |
 | FRP-IA-07 | Consolidation of observations and learned material | Future |

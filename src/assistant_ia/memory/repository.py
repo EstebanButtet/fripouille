@@ -29,7 +29,7 @@ DEFAULT_DATABASE_DIRECTORY_NAME = "assistant-ia"
 DEFAULT_DATABASE_FILENAME = "assistant_ia.db"
 
 _INITIAL_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 _SCHEMA_VERSION_COLUMNS = (
     ("id", "INTEGER", 0, 1),
@@ -80,6 +80,24 @@ _BUSINESS_TABLE_COLUMNS = {
         ("memory_id", "INTEGER", 1, 1),
         ("person_id", "INTEGER", 1, 2),
         ("role", "TEXT", 1, 3),
+    ),
+    "person_relationships": (
+        ("person_id", "INTEGER", 0, 1),
+        ("familiarity", "TEXT", 1, 0),
+        ("interaction_style", "TEXT", 1, 0),
+        ("created_at", "TEXT", 1, 0),
+        ("updated_at", "TEXT", 1, 0),
+    ),
+    "person_observations": (
+        ("id", "INTEGER", 0, 1),
+        ("person_id", "INTEGER", 1, 0),
+        ("category", "TEXT", 1, 0),
+        ("content", "TEXT", 1, 0),
+        ("source", "TEXT", 1, 0),
+        ("source_text", "TEXT", 0, 0),
+        ("confidence", "REAL", 1, 0),
+        ("status", "TEXT", 1, 0),
+        ("created_at", "TEXT", 1, 0),
     ),
 }
 
@@ -515,6 +533,62 @@ def _migrate_schema_5_to_6(
     )
 
 
+def _migrate_schema_6_to_7(
+    connection: sqlite3.Connection,
+) -> None:
+    """Ajouter relations et observations sans inventer de données sociales."""
+    connection.execute(
+        """
+        CREATE TABLE person_relationships (
+            person_id INTEGER PRIMARY KEY
+                REFERENCES persons(id) ON DELETE CASCADE,
+            familiarity TEXT NOT NULL
+                CHECK (familiarity IN ('new', 'known', 'familiar', 'close')),
+            interaction_style TEXT NOT NULL
+                CHECK (interaction_style IN (
+                    'neutral', 'direct', 'warm', 'playful', 'formal'
+                )),
+            created_at TEXT NOT NULL
+                CHECK (length(trim(created_at)) > 0),
+            updated_at TEXT NOT NULL
+                CHECK (length(trim(updated_at)) > 0)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE person_observations (
+            id INTEGER PRIMARY KEY,
+            person_id INTEGER NOT NULL
+                REFERENCES persons(id) ON DELETE CASCADE,
+            category TEXT NOT NULL
+                CHECK (category IN (
+                    'communication', 'preference', 'habit', 'behavior', 'context'
+                )),
+            content TEXT NOT NULL
+                CHECK (length(trim(content)) > 0),
+            source TEXT NOT NULL
+                CHECK (source IN ('manual_entry', 'conversation_analysis')),
+            source_text TEXT
+                CHECK (source_text IS NULL OR length(trim(source_text)) > 0),
+            confidence REAL NOT NULL
+                CHECK (confidence >= 0.0 AND confidence <= 1.0),
+            status TEXT NOT NULL
+                CHECK (status IN ('unconfirmed')),
+            created_at TEXT NOT NULL
+                CHECK (length(trim(created_at)) > 0),
+            CHECK (source != 'conversation_analysis' OR source_text IS NOT NULL)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_person_observations_person_created
+        ON person_observations (person_id, created_at DESC, id DESC)
+        """
+    )
+
+
 def _ensure_default_person(
     connection: sqlite3.Connection,
 ) -> None:
@@ -604,6 +678,7 @@ _SCHEMA_MIGRATIONS = {
     3: _migrate_schema_3_to_4,
     4: _migrate_schema_4_to_5,
     5: _migrate_schema_5_to_6,
+    6: _migrate_schema_6_to_7,
 }
 
 

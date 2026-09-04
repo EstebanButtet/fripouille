@@ -495,6 +495,26 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 ),
             )
 
+    def _create_version_six_schema(self) -> None:
+        """Create populated v6 data before the social schema migration."""
+        self._create_version_five_schema(
+            memories=(
+                (4, "Souvenir v6.", "2026-08-07T02:00:00+00:00"),
+            )
+        )
+        with self.database.connect() as connection:
+            repository_module._migrate_schema_5_to_6(connection)
+            connection.execute(
+                "UPDATE schema_version SET version = 6 WHERE id = 1"
+            )
+            connection.execute(
+                """
+                INSERT INTO memory_people (memory_id, person_id, role)
+                VALUES (?, ?, ?)
+                """,
+                (4, 7, "subject"),
+            )
+
     def _table_names(self) -> list[tuple[str]]:
         """Return all non-internal table names in deterministic order."""
         with self.database.connect() as connection:
@@ -551,6 +571,8 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 ("journal_entries",),
                 ("memories",),
                 ("memory_people",),
+                ("person_observations",),
+                ("person_relationships",),
                 ("persons",),
                 ("profile_facts",),
                 ("schema_version",),
@@ -860,6 +882,8 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 ("journal_entries",),
                 ("memories",),
                 ("memory_people",),
+                ("person_observations",),
+                ("person_relationships",),
                 ("persons",),
                 ("profile_facts",),
                 ("schema_version",),
@@ -1021,6 +1045,43 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
             tuple(item.memory.id for item in retrieved),
             (memory[0],),
         )
+
+    def test_migrates_v6_to_v7_without_losing_existing_data(self) -> None:
+        """Social tables should start empty while every v6 domain survives."""
+        self._create_version_six_schema()
+
+        self.database.initialize()
+
+        with self.database.connect() as connection:
+            version = connection.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            memory = connection.execute(
+                "SELECT content FROM memories WHERE id = 4"
+            ).fetchone()
+            person = connection.execute(
+                "SELECT display_name FROM persons WHERE id = 7"
+            ).fetchone()
+            profile_fact = connection.execute(
+                "SELECT content FROM profile_facts WHERE id = 8"
+            ).fetchone()
+            links = connection.execute(
+                "SELECT memory_id, person_id, role FROM memory_people"
+            ).fetchall()
+            relationships = connection.execute(
+                "SELECT * FROM person_relationships"
+            ).fetchall()
+            observations = connection.execute(
+                "SELECT * FROM person_observations"
+            ).fetchall()
+
+        self.assertEqual(version, (CURRENT_SCHEMA_VERSION,))
+        self.assertEqual(memory, ("Souvenir v6.",))
+        self.assertEqual(person, ("Alice",))
+        self.assertEqual(profile_fact, ("J'aime la robotique.",))
+        self.assertEqual(links, [(4, 7, "subject")])
+        self.assertEqual(relationships, [])
+        self.assertEqual(observations, [])
 
     def test_initialize_does_not_duplicate_default_person(self) -> None:
         """Repeated storage initialization should retain one default row."""

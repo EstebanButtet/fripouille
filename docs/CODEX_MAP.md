@@ -50,6 +50,9 @@ l'apprentissage et de l'état interne.
 | `src/assistant_ia/people/profile_models.py` | Faits de profil confirmés et candidats distincts. |
 | `src/assistant_ia/people/profile_fact_repository.py` | Persistance SQLite des faits, isolée par personne. |
 | `src/assistant_ia/people/profile_promotion.py` | Doublon, correction, conflit et promotion confirmée. |
+| `src/assistant_ia/people/social_models.py` | Relations bornées et observations non confirmées. |
+| `src/assistant_ia/people/relationship_repository.py` | Relation conversationnelle optionnelle par personne. |
+| `src/assistant_ia/people/observation_repository.py` | Observations multiples, privées et inspectables. |
 | `src/assistant_ia/intelligence/profile_fact_candidates.py` | Analyse Ollama bornée des candidats de profil. |
 
 ## Mémoire
@@ -108,7 +111,8 @@ variante firmware expérimentale dans un commit IA.
   `tests/test_person_repository.py`, `tests/test_person_resolution.py`,
   `tests/test_profile_fact_repository.py`,
   `tests/test_profile_fact_candidates.py`,
-  `tests/test_profile_fact_promotion_pipeline.py`.
+  `tests/test_profile_fact_promotion_pipeline.py`,
+  `tests/test_social_repository.py`.
 - Mémoire : `tests/test_memory_repository.py`,
   `tests/test_memory_retrieval.py`,
   `tests/test_memory_promotion_pipeline.py`,
@@ -132,3 +136,5 @@ variante firmware expérimentale dans un commit IA.
 - Identité stable : `identity/`.
 - Faits de profil : `people/profile_models.py` +
   `people/profile_fact_repository.py` + `people/profile_promotion.py`.
+- Relations et observations : `people/social_models.py` +
+  `people/relationship_repository.py` + `people/observation_repository.py`.

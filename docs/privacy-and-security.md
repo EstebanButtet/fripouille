@@ -52,6 +52,12 @@ automatic contextual recall, the active person can receive their linked
 memories and relevant unassigned memories; memories linked only to another
 person are excluded in repository-backed retrieval before any prompt is built.
 
+Relations and observations are also stored per persistent person. New people
+receive no inferred relationship. Relationship dimensions affect no permission
+or security decision, and observations remain explicitly unconfirmed rather
+than becoming profile facts. FRP-IA-04E persists these records but does not yet
+inject them into model prompts.
+
 ## Action authority
 
 The language model can propose only a name from a closed intent set and
