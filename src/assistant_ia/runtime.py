@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from assistant_ia.core.assistant import AssistantCore
+from assistant_ia.actions.result import ActionExecutionResult
 from assistant_ia.intelligence.intent import Intent
 from assistant_ia.interfaces.presentation import (
     build_user_facing_response,
@@ -37,6 +38,7 @@ class TurnDiagnostics:
     user_message: str
     raw_response: str
     intent: Intent | None
+    action_result: ActionExecutionResult | None
     memory_candidates: tuple[MemoryCandidate, ...]
     memory_promotion_proposal: MemoryPromotionProposal | None
 
@@ -110,6 +112,7 @@ class AssistantRuntime:
             user_message=user_message,
             raw_response=raw_response,
             intent=self._assistant.last_intent,
+            action_result=self._assistant.last_action_result,
             memory_candidates=(
                 self._assistant.last_memory_candidates
             ),

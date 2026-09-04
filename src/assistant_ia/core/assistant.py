@@ -30,6 +30,7 @@ from assistant_ia.actions.registry import (
     ActionNotRegisteredError,
     ActionRegistry,
 )
+from assistant_ia.actions.result import ActionExecutionResult
 from assistant_ia.core.context import ConversationContext
 from assistant_ia.identity.defaults import build_default_identity
 from assistant_ia.intelligence.intent import Intent
@@ -236,6 +237,7 @@ class AssistantCore:
         # Les objets d'analyse et de promotion sont séparés : le premier ne
         # persiste rien, le second applique les règles applicatives de mémoire.
         self._last_intent: Intent | None = None
+        self._last_action_result: ActionExecutionResult | None = None
         self._person_resolution_service = person_resolution_service
         self._last_person_resolution: PersonResolution | None = None
         self._memory_candidate_analyzer = memory_candidate_analyzer
@@ -288,6 +290,11 @@ class AssistantCore:
     def last_intent(self) -> Intent | None:
         """Retourner la dernière intention structurée identifiée."""
         return self._last_intent
+
+    @property
+    def last_action_result(self) -> ActionExecutionResult | None:
+        """Retourner le résultat vérifié de la dernière action interprétée."""
+        return self._last_action_result
 
     @property
     def last_person_resolution(self) -> PersonResolution | None:
@@ -364,6 +371,7 @@ class AssistantCore:
         self._pending_memory_promotion = None
         self._pending_profile_fact_promotion = None
         self._last_intent = None
+        self._last_action_result = None
         self._last_person_resolution = None
         self._last_memory_candidates = ()
         self._last_memory_promotion_proposal = None
@@ -514,6 +522,7 @@ class AssistantCore:
         self._context.clear()
         self._person_context.reset()
         self._last_intent = None
+        self._last_action_result = None
         self._last_person_resolution = None
         self._last_memory_candidates = ()
         self._last_memory_promotion_proposal = None
@@ -616,6 +625,7 @@ class AssistantCore:
         self._last_memory_promotion_proposal = None
         self._pending_memory_promotion = None
         self._last_intent = None
+        self._last_action_result = None
         self._last_person_resolution = None
 
         if normalized in _PROFILE_CONFIRMATION_REFUSED:
@@ -709,6 +719,7 @@ class AssistantCore:
         self._last_memory_candidates = ()
         self._last_memory_promotion_proposal = proposal
         self._last_intent = None
+        self._last_action_result = None
         self._last_person_resolution = None
 
         if normalized_response in _MEMORY_CONFIRMATION_REFUSED:
@@ -762,13 +773,33 @@ class AssistantCore:
             return ACTION_UNAVAILABLE_MESSAGE
 
         try:
-            return self._action_registry.execute(intent)
+            result = self._action_registry.execute_result(intent)
         except ActionNotRegisteredError:
-            return ACTION_UNAVAILABLE_MESSAGE
+            result = ActionExecutionResult(
+                action_name=intent.name,
+                status="error",
+                message=ACTION_UNAVAILABLE_MESSAGE,
+                attempted=False,
+                error_kind="validation",
+            )
         except ActionValidationError as error:
-            return str(error)
+            result = ActionExecutionResult(
+                action_name=intent.name,
+                status="error",
+                message=str(error),
+                attempted=False,
+                error_kind="validation",
+            )
         except ActionExecutionError:
-            return ACTION_EXECUTION_ERROR_MESSAGE
+            result = ActionExecutionResult(
+                action_name=intent.name,
+                status="error",
+                message=ACTION_EXECUTION_ERROR_MESSAGE,
+                attempted=True,
+                error_kind="execution",
+            )
+        self._last_action_result = result
+        return result.message
 
 
 def _recover_missing_journal_content(

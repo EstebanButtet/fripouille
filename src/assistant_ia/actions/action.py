@@ -16,6 +16,7 @@ from assistant_ia.intelligence.intent import (
     INTENT_PARAMETER_SPECIFICATIONS,
     Intent,
 )
+from assistant_ia.actions.result import ActionExecutionResult
 from assistant_ia.memory.errors import RepositoryError
 from assistant_ia.memory.repository import DatabaseError
 
@@ -43,7 +44,10 @@ EXECUTABLE_INTENT_NAMES: frozenset[str] = frozenset(
     }
 )
 
-ActionHandler = Callable[[Mapping[str, str]], str]
+ActionHandler = Callable[
+    [Mapping[str, str]],
+    str | ActionExecutionResult,
+]
 
 
 class ActionError(RuntimeError):
@@ -92,6 +96,10 @@ class Action:
         )
 
     def execute(self, intent: Intent) -> str:
+        """Préserver l'API texte historique autour du résultat structuré."""
+        return self.execute_result(intent).message
+
+    def execute_result(self, intent: Intent) -> ActionExecutionResult:
         """Valider une intention puis appeler le handler enregistré.
 
         Les erreurs de paramètres et de repository sont traduites en familles
@@ -146,6 +154,13 @@ class Action:
                  "L’action n’a pas pu être exécutée."
             ) from error
 
+        if isinstance(result, ActionExecutionResult):
+            if result.action_name != self.name:
+                raise ActionExecutionError(
+                    "Le résultat ne correspond pas à l’action exécutée."
+                )
+            return result
+
         if not isinstance(result, str):
             raise ActionExecutionError(
                 "Le résultat de l’action doit être un texte."
@@ -158,4 +173,9 @@ class Action:
                 "Le résultat de l’action ne peut pas être vide."
             )
 
-        return normalized_result
+        return ActionExecutionResult(
+            action_name=self.name,
+            status="success",
+            message=normalized_result,
+            attempted=True,
+        )

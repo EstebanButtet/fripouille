@@ -14,6 +14,7 @@ from assistant_ia.actions.action import (
     Action,
     ActionError,
 )
+from assistant_ia.actions.result import ActionExecutionResult
 from assistant_ia.intelligence.intent import Intent
 
 
@@ -83,6 +84,10 @@ class ActionRegistry:
 
     def execute(self, intent: Intent) -> str:
         """Sélectionner puis exécuter l'action d'une intention structurée."""
+        return self.execute_result(intent).message
+
+    def execute_result(self, intent: Intent) -> ActionExecutionResult:
+        """Exécuter une action et conserver son résultat applicatif structuré."""
         if not isinstance(intent, Intent):
             raise TypeError(
                 "Action registry execution requires an Intent."
@@ -96,4 +101,4 @@ class ActionRegistry:
                 f"l’intention {intent.name!r}."
             )
 
-        return action.execute(intent)
+        return action.execute_result(intent)

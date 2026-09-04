@@ -21,6 +21,7 @@ from assistant_ia.actions.action import (
     ActionValidationError,
 )
 from assistant_ia.actions.registry import ActionRegistry
+from assistant_ia.actions.result import ActionExecutionResult
 from assistant_ia.memory.errors import (
     MemoryNotFoundError,
     TaskAlreadyCompletedError,
@@ -248,7 +249,7 @@ class _SystemActionHandlers:
     def launch_application(
         self,
         parameters: Mapping[str, str],
-    ) -> str:
+    ) -> ActionExecutionResult:
         """Lancer une application explicitement présente dans la liste blanche.
 
         Une annulation produit une réponse normale sans effet. Une cible non
@@ -294,9 +295,14 @@ class _SystemActionHandlers:
                 ) from error
 
             if not confirmed:
-                return (
-                    f"Lancement annulé : "
-                    f"{application.display_name}."
+                return ActionExecutionResult(
+                    action_name="launch_application",
+                    status="cancelled",
+                    message=(
+                        f"Lancement annulé : "
+                        f"{application.display_name}."
+                    ),
+                    attempted=False,
                 )
 
         try:
@@ -308,9 +314,14 @@ class _SystemActionHandlers:
                 "L’application n’a pas pu être lancée."
             ) from error
 
-        return (
-            f"Application lancée : "
-            f"{launched_application.display_name}."
+        return ActionExecutionResult(
+            action_name="launch_application",
+            status="success",
+            message=(
+                f"Application lancée : "
+                f"{launched_application.display_name}."
+            ),
+            attempted=True,
         )
 
 
