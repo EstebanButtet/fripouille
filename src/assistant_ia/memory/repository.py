@@ -29,7 +29,7 @@ DEFAULT_DATABASE_DIRECTORY_NAME = "assistant-ia"
 DEFAULT_DATABASE_FILENAME = "assistant_ia.db"
 
 _INITIAL_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 _SCHEMA_VERSION_COLUMNS = (
     ("id", "INTEGER", 0, 1),
@@ -98,6 +98,37 @@ _BUSINESS_TABLE_COLUMNS = {
         ("confidence", "REAL", 1, 0),
         ("status", "TEXT", 1, 0),
         ("created_at", "TEXT", 1, 0),
+    ),
+    "behavioral_experiences": (
+        ("id", "INTEGER", 0, 1),
+        ("person_id", "INTEGER", 0, 0),
+        ("context", "TEXT", 1, 0),
+        ("objective", "TEXT", 1, 0),
+        ("strategy", "TEXT", 1, 0),
+        ("result", "TEXT", 1, 0),
+        ("evaluation", "TEXT", 0, 0),
+        ("source_type", "TEXT", 1, 0),
+        ("source_reference", "TEXT", 0, 0),
+        ("source_text", "TEXT", 0, 0),
+        ("status", "TEXT", 1, 0),
+        ("invalidation_reason", "TEXT", 0, 0),
+        ("created_at", "TEXT", 1, 0),
+        ("updated_at", "TEXT", 1, 0),
+    ),
+    "behavioral_lesson_candidates": (
+        ("id", "INTEGER", 0, 1),
+        ("person_id", "INTEGER", 0, 0),
+        ("context_pattern", "TEXT", 1, 0),
+        ("proposed_strategy", "TEXT", 1, 0),
+        ("rationale", "TEXT", 1, 0),
+        ("status", "TEXT", 1, 0),
+        ("invalidation_reason", "TEXT", 0, 0),
+        ("created_at", "TEXT", 1, 0),
+        ("updated_at", "TEXT", 1, 0),
+    ),
+    "behavioral_lesson_sources": (
+        ("candidate_id", "INTEGER", 1, 1),
+        ("experience_id", "INTEGER", 1, 2),
     ),
 }
 
@@ -589,6 +620,134 @@ def _migrate_schema_6_to_7(
     )
 
 
+def _migrate_schema_7_to_8(
+    connection: sqlite3.Connection,
+) -> None:
+    """Ajouter les fondations d'apprentissage sans créer de règle stable."""
+    connection.execute(
+        """
+        CREATE TABLE behavioral_experiences (
+            id INTEGER PRIMARY KEY,
+            person_id INTEGER
+                REFERENCES persons(id) ON DELETE CASCADE,
+            context TEXT NOT NULL
+                CHECK (length(trim(context)) > 0),
+            objective TEXT NOT NULL
+                CHECK (length(trim(objective)) > 0),
+            strategy TEXT NOT NULL
+                CHECK (length(trim(strategy)) > 0),
+            result TEXT NOT NULL
+                CHECK (length(trim(result)) > 0),
+            evaluation TEXT
+                CHECK (evaluation IS NULL OR length(trim(evaluation)) > 0),
+            source_type TEXT NOT NULL
+                CHECK (source_type IN (
+                    'manual_entry',
+                    'conversation_turn',
+                    'action_execution',
+                    'external_system'
+                )),
+            source_reference TEXT
+                CHECK (
+                    source_reference IS NULL
+                    OR length(trim(source_reference)) > 0
+                ),
+            source_text TEXT
+                CHECK (source_text IS NULL OR length(trim(source_text)) > 0),
+            status TEXT NOT NULL
+                CHECK (status IN ('active', 'invalidated')),
+            invalidation_reason TEXT
+                CHECK (
+                    invalidation_reason IS NULL
+                    OR length(trim(invalidation_reason)) > 0
+                ),
+            created_at TEXT NOT NULL
+                CHECK (length(trim(created_at)) > 0),
+            updated_at TEXT NOT NULL
+                CHECK (length(trim(updated_at)) > 0),
+            CHECK (
+                source_type != 'conversation_turn'
+                OR source_text IS NOT NULL
+            ),
+            CHECK (
+                source_type NOT IN ('action_execution', 'external_system')
+                OR source_reference IS NOT NULL
+            ),
+            CHECK (
+                (status = 'active' AND invalidation_reason IS NULL)
+                OR
+                (status = 'invalidated' AND invalidation_reason IS NOT NULL)
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_behavioral_experiences_person_created
+        ON behavioral_experiences (person_id, created_at DESC, id DESC)
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE behavioral_lesson_candidates (
+            id INTEGER PRIMARY KEY,
+            person_id INTEGER
+                REFERENCES persons(id) ON DELETE CASCADE,
+            context_pattern TEXT NOT NULL
+                CHECK (length(trim(context_pattern)) > 0),
+            proposed_strategy TEXT NOT NULL
+                CHECK (length(trim(proposed_strategy)) > 0),
+            rationale TEXT NOT NULL
+                CHECK (length(trim(rationale)) > 0),
+            status TEXT NOT NULL
+                CHECK (status IN ('active', 'invalidated')),
+            invalidation_reason TEXT
+                CHECK (
+                    invalidation_reason IS NULL
+                    OR length(trim(invalidation_reason)) > 0
+                ),
+            created_at TEXT NOT NULL
+                CHECK (length(trim(created_at)) > 0),
+            updated_at TEXT NOT NULL
+                CHECK (length(trim(updated_at)) > 0),
+            CHECK (
+                (status = 'active' AND invalidation_reason IS NULL)
+                OR
+                (status = 'invalidated' AND invalidation_reason IS NOT NULL)
+            )
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_behavioral_candidates_person_created
+        ON behavioral_lesson_candidates (
+            person_id,
+            created_at DESC,
+            id DESC
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE TABLE behavioral_lesson_sources (
+            candidate_id INTEGER NOT NULL
+                REFERENCES behavioral_lesson_candidates(id)
+                ON DELETE CASCADE,
+            experience_id INTEGER NOT NULL
+                REFERENCES behavioral_experiences(id),
+            PRIMARY KEY (candidate_id, experience_id)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_behavioral_lesson_sources_experience
+        ON behavioral_lesson_sources (experience_id, candidate_id)
+        """
+    )
+
+
 def _ensure_default_person(
     connection: sqlite3.Connection,
 ) -> None:
@@ -679,6 +838,7 @@ _SCHEMA_MIGRATIONS = {
     4: _migrate_schema_4_to_5,
     5: _migrate_schema_5_to_6,
     6: _migrate_schema_6_to_7,
+    7: _migrate_schema_7_to_8,
 }
 
 

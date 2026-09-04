@@ -515,6 +515,34 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 (4, 7, "subject"),
             )
 
+    def _create_version_seven_schema(self) -> None:
+        """Create populated v7 data before behavioral learning tables."""
+        self._create_version_six_schema()
+        with self.database.connect() as connection:
+            repository_module._migrate_schema_6_to_7(connection)
+            connection.execute(
+                "UPDATE schema_version SET version = 7 WHERE id = 1"
+            )
+            connection.execute(
+                """
+                INSERT INTO person_observations (
+                    id, person_id, category, content, source, source_text,
+                    confidence, status, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    9,
+                    7,
+                    "communication",
+                    "Signal social v7.",
+                    "manual_entry",
+                    None,
+                    1.0,
+                    "unconfirmed",
+                    "2026-08-07T06:00:00+00:00",
+                ),
+            )
+
     def _table_names(self) -> list[tuple[str]]:
         """Return all non-internal table names in deterministic order."""
         with self.database.connect() as connection:
@@ -568,6 +596,9 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
         self.assertEqual(
             self._table_names(),
             [
+                ("behavioral_experiences",),
+                ("behavioral_lesson_candidates",),
+                ("behavioral_lesson_sources",),
                 ("journal_entries",),
                 ("memories",),
                 ("memory_people",),
@@ -879,6 +910,9 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
         self.assertEqual(
             self._table_names(),
             [
+                ("behavioral_experiences",),
+                ("behavioral_lesson_candidates",),
+                ("behavioral_lesson_sources",),
                 ("journal_entries",),
                 ("memories",),
                 ("memory_people",),
@@ -1082,6 +1116,43 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
         self.assertEqual(links, [(4, 7, "subject")])
         self.assertEqual(relationships, [])
         self.assertEqual(observations, [])
+
+    def test_migrates_v7_to_v8_without_losing_existing_data(self) -> None:
+        """Learning tables should start empty while every v7 domain survives."""
+        self._create_version_seven_schema()
+
+        self.database.initialize()
+
+        with self.database.connect() as connection:
+            version = connection.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            memory = connection.execute(
+                "SELECT content FROM memories WHERE id = 4"
+            ).fetchone()
+            person = connection.execute(
+                "SELECT display_name FROM persons WHERE id = 7"
+            ).fetchone()
+            observation = connection.execute(
+                "SELECT content FROM person_observations WHERE id = 9"
+            ).fetchone()
+            experiences = connection.execute(
+                "SELECT * FROM behavioral_experiences"
+            ).fetchall()
+            candidates = connection.execute(
+                "SELECT * FROM behavioral_lesson_candidates"
+            ).fetchall()
+            sources = connection.execute(
+                "SELECT * FROM behavioral_lesson_sources"
+            ).fetchall()
+
+        self.assertEqual(version, (CURRENT_SCHEMA_VERSION,))
+        self.assertEqual(memory, ("Souvenir v6.",))
+        self.assertEqual(person, ("Alice",))
+        self.assertEqual(observation, ("Signal social v7.",))
+        self.assertEqual(experiences, [])
+        self.assertEqual(candidates, [])
+        self.assertEqual(sources, [])
 
     def test_initialize_does_not_duplicate_default_person(self) -> None:
         """Repeated storage initialization should retain one default row."""
