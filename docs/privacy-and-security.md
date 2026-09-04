@@ -55,8 +55,14 @@ person are excluded in repository-backed retrieval before any prompt is built.
 Relations and observations are also stored per persistent person. New people
 receive no inferred relationship. Relationship dimensions affect no permission
 or security decision, and observations remain explicitly unconfirmed rather
-than becoming profile facts. FRP-IA-04E persists these records but does not yet
-inject them into model prompts.
+than becoming profile facts.
+
+Social prompt context is selected only from the application-resolved active
+person. It contains at most eight confirmed profile facts (300 characters each,
+1,200 total), one bounded relationship (100 characters across its enum values),
+and three recent observations (300 characters each, 600 total). Identifiers and
+raw source evidence are omitted. Each source has a separate non-authoritative
+prompt section, and memory retains its own independent limits.
 
 ## Action authority
 

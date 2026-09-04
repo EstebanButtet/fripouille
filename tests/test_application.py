@@ -20,6 +20,7 @@ from assistant_ia.intelligence.intent import Intent
 from assistant_ia.intelligence.response import ModelResponse
 from assistant_ia.memory.memory_repository import MemoryRepository
 from assistant_ia.memory.retrieval import ContextualMemoryRetriever
+from assistant_ia.people.social_context import PersonSocialContextProvider
 from assistant_ia.memory.repository import (
     DEFAULT_DATABASE_DIRECTORY_NAME,
     DEFAULT_DATABASE_FILENAME,
@@ -117,6 +118,10 @@ class ApplicationAssemblyTests(unittest.TestCase):
                 "contextual_memory_retriever"
             ],
             ContextualMemoryRetriever,
+        )
+        self.assertIsInstance(
+            ollama_client.call_args.kwargs["social_context_provider"],
+            PersonSocialContextProvider,
         )
         self.assertTrue(
             ollama_client.call_args.kwargs[

@@ -14,7 +14,7 @@ flux suivant sans mélanger les responsabilités::
                                       |-> registre d'actions
                                       |-> résolution de personne
                                       |-> services de mémoire
-                                      `-> faits de profil contrôlés
+                                      `-> contexte social borné
 """
 
 from __future__ import annotations
@@ -53,10 +53,15 @@ from assistant_ia.memory.repository import (
 from assistant_ia.memory.task_repository import TaskRepository
 from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import DEFAULT_PERSON_ID
+from assistant_ia.people.observation_repository import ObservationRepository
 from assistant_ia.people.person_repository import PersonRepository
 from assistant_ia.people.profile_fact_repository import ProfileFactRepository
 from assistant_ia.people.profile_promotion import ProfileFactPromotionService
+from assistant_ia.people.relationship_repository import (
+    PersonRelationshipRepository,
+)
 from assistant_ia.people.resolution import PersonResolutionService
+from assistant_ia.people.social_context import PersonSocialContextProvider
 from assistant_ia.security.confirmation import ConfirmationHandler
 from assistant_ia.security.permissions import PermissionPolicy
 from assistant_ia.runtime import (
@@ -238,6 +243,11 @@ def build_default_assistant(
                 ContextualMemoryRetriever(
                     memory_repository
                 )
+            ),
+            social_context_provider=PersonSocialContextProvider(
+                profile_fact_repository,
+                PersonRelationshipRepository(resolved_database),
+                ObservationRepository(resolved_database),
             ),
         )
     )

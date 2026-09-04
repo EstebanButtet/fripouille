@@ -18,22 +18,23 @@ renaming history.
 | FRP-IA-02 | `AssistantRuntime`, interface/core separation, terminal routing, and tested presenter boundaries | Completed |
 | FRP-IA-02B | Lightweight provisional tkinter chat interface and project map | Completed prototype |
 | FRP-IA-03 | Contextual memory series: provenance and schema v3, retrieval, bounded history, prompt injection, automatic candidates, controlled promotion and correction | Completed |
+| FRP-IA-04 | Persistent people, controlled profile facts, person-scoped memories, bounded relationships, observations and private social context | Completed |
 
 The hardware display commits in the same history establish a prototype track,
 not proof that a complete robot has been delivered.
 
 ## Current position
 
-The current branch includes FRP-IA-04A through 04E: persistent people,
+The current branch includes FRP-IA-04A through 04F: persistent people,
 deterministic active-person resolution, controlled profile facts, and
 inspectable memory/person associations, bounded relationships and explicitly
-unconfirmed observations. Social context is still not injected into prompts.
+unconfirmed observations. Bounded social context is injected only for the
+active person, independently from contextual memory.
 
 ## Planned milestones
 
 | Milestone | Direction | Status |
 | --- | --- | --- |
-| FRP-IA-04 | Persistent people, profiles, person-scoped memories, relationships and bounded social context | In progress through FRP-IA-04E |
 | FRP-IA-05 | Behavioral learning kept separate from permanent identity | Future |
 | FRP-IA-06 | Experience feedback and explicit evaluation of outcomes | Future |
 | FRP-IA-07 | Consolidation of observations and learned material | Future |

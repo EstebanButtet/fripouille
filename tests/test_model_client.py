@@ -28,7 +28,13 @@ from assistant_ia.memory.repository import DatabaseError, SQLiteDatabase
 from assistant_ia.memory.retrieval import ContextualMemoryRetriever
 from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import DEFAULT_PERSON_ID
+from assistant_ia.people.observation_repository import ObservationRepository
 from assistant_ia.people.person_repository import PersonRepository
+from assistant_ia.people.profile_fact_repository import ProfileFactRepository
+from assistant_ia.people.relationship_repository import (
+    PersonRelationshipRepository,
+)
+from assistant_ia.people.social_context import PersonSocialContextProvider
 
 
 class FakeHTTPResponse:
@@ -750,6 +756,96 @@ class OllamaModelClientTests(unittest.TestCase):
                 limit=5,
                 person_id=este.id,
             )
+
+    def test_social_context_uses_only_application_active_person(self) -> None:
+        """Social lookup should receive the resolved ID but render no IDs."""
+        messages = (
+            ConversationMessage(role="user", content="Comment avancer ?"),
+        )
+        captured_payloads, fake_urlopen = build_two_stage_urlopen()
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = SQLiteDatabase(Path(directory) / "assistant.db")
+            database.initialize()
+            persons = PersonRepository(database)
+            este = persons.get_person(DEFAULT_PERSON_ID)
+            assert este is not None
+            alice = persons.create_person("Alice")
+            profiles = ProfileFactRepository(database)
+            profiles.create_profile_fact(
+                este.id, "communication_preference", "Réponses directes."
+            )
+            profiles.create_profile_fact(
+                alice.id, "interest", "Secret social Alice."
+            )
+            provider = PersonSocialContextProvider(
+                profiles,
+                PersonRelationshipRepository(database),
+                ObservationRepository(database),
+            )
+            identity = build_default_identity()
+            person_context = ActivePersonContext(
+                assistant_name=identity.name,
+                default_person=este,
+            )
+
+            with (
+                patch.object(provider, "build", wraps=provider.build) as build,
+                patch(
+                    "assistant_ia.intelligence.model_client.urlopen",
+                    side_effect=fake_urlopen,
+                ),
+            ):
+                OllamaModelClient(
+                    identity=identity,
+                    person_context=person_context,
+                    social_context_provider=provider,
+                ).generate_response(messages)
+
+            build.assert_called_once_with(este.id)
+
+        interpretation_prompt = captured_payloads[0]["messages"][0]["content"]
+        conversation_prompt = captured_payloads[1]["messages"][0]["content"]
+        self.assertNotIn("Réponses directes.", interpretation_prompt)
+        self.assertIn("Réponses directes.", conversation_prompt)
+        self.assertNotIn("Secret social Alice.", conversation_prompt)
+        self.assertNotIn('"person_id"', conversation_prompt)
+
+    def test_social_context_failure_fails_soft_for_conversation(self) -> None:
+        """A social storage failure must not prevent the natural response."""
+        captured_payloads, fake_urlopen = build_two_stage_urlopen(
+            conversation_content="Réponse sans contexte social."
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            database = SQLiteDatabase(Path(directory) / "assistant.db")
+            database.initialize()
+            provider = PersonSocialContextProvider(
+                ProfileFactRepository(database),
+                PersonRelationshipRepository(database),
+                ObservationRepository(database),
+            )
+            with (
+                patch.object(
+                    provider,
+                    "build",
+                    side_effect=DatabaseError("social storage unavailable"),
+                ),
+                patch(
+                    "assistant_ia.intelligence.model_client.urlopen",
+                    side_effect=fake_urlopen,
+                ),
+            ):
+                response = OllamaModelClient(
+                    social_context_provider=provider
+                ).generate_response(
+                    (ConversationMessage(role="user", content="Bonjour."),)
+                )
+
+        self.assertEqual(response.content, "Réponse sans contexte social.")
+        self.assertNotIn(
+            "active-person profile data",
+            captured_payloads[1]["messages"][0]["content"].casefold(),
+        )
 
     def test_no_match_does_not_add_contextual_prompt_section(self) -> None:
         """An irrelevant store should leave natural generation unchanged."""

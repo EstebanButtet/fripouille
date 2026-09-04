@@ -63,9 +63,9 @@ An intent is therefore a proposal, not an executed action.
 | Identity | Immutable configuration describing Fripouille's stable identity | Implemented |
 | Conversation | Temporary, bounded session history | Implemented |
 | People | Persistent person registry and the active speaker for the current session | Implemented through FRP-IA-04B |
-| Profile facts | Confirmed, person-scoped facts promoted from separate candidates | Implemented through FRP-IA-04C; no prompt injection yet |
+| Profile facts | Confirmed, person-scoped facts promoted from separate candidates | Implemented and bounded in active-person context |
 | Memory | Confirmed memories, optional person links and scoped contextual retrieval | Implemented through FRP-IA-04D |
-| Relationships | Optional bounded relationship and unconfirmed observations per person | Implemented through FRP-IA-04E; no prompt injection yet |
+| Relationships | Optional bounded relationship and unconfirmed observations per person | Implemented and bounded in active-person context |
 | Learning | Behavioral adaptation derived from experience | Not implemented |
 | Internal state | Persistent or evolving assistant state distinct from identity | Not implemented |
 | Roles | Future contextual roles and professions, distinct from the identity's descriptive role field | Not implemented |
@@ -122,6 +122,14 @@ only bounded familiarity and conversational interaction-style dimensions. It
 is absent by default and has no security authority. `Observation` records a
 categorized, sourced, confidence-bearing signal with the explicit status
 `unconfirmed`; it never becomes a `ProfileFact` automatically.
+
+`PersonSocialContextProvider` reads only the application-resolved active
+person. Confirmed facts, the optional relationship and recent unconfirmed
+observations are bounded independently and rendered in separate prompt
+sections before contextual memories. Persistent identifiers, source evidence
+and data belonging to another person never enter this social prompt context.
+Relationship data is conversational guidance only and cannot alter identity,
+permissions, confirmation or action validation.
 
 Manual memory actions are explicit. Automatic analysis first creates
 non-persistent candidates with source evidence. `MemoryPromotionService`

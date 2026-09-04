@@ -71,6 +71,10 @@ from assistant_ia.memory.retrieval import (
 )
 from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import build_default_person
+from assistant_ia.people.social_context import (
+    PersonSocialContextProvider,
+    SocialContext,
+)
 
 
 DEFAULT_MODEL = "qwen3.5:9b"
@@ -125,6 +129,7 @@ class OllamaModelClient:
         contextual_memory_retriever: (
             ContextualMemoryRetriever | None
         ) = None,
+        social_context_provider: PersonSocialContextProvider | None = None,
     ) -> None:
         """Créer le client avec une configuration locale explicite.
 
@@ -189,6 +194,15 @@ class OllamaModelClient:
                 "ContextualMemoryRetriever."
             )
 
+        if social_context_provider is not None and not isinstance(
+            social_context_provider,
+            PersonSocialContextProvider,
+        ):
+            raise TypeError(
+                "Ollama social context provider must be a "
+                "PersonSocialContextProvider."
+            )
+
         normalized_model = model.strip()
         normalized_base_url = base_url.strip().rstrip("/")
 
@@ -236,6 +250,7 @@ class OllamaModelClient:
         self._contextual_memory_retriever = (
             contextual_memory_retriever
         )
+        self._social_context_provider = social_context_provider
 
         if (
             self._capability_context.automatic_memory_retrieval
@@ -330,10 +345,12 @@ class OllamaModelClient:
                 turn.current_user_message.content
             )
         )
+        social_context = self._retrieve_social_context()
 
         conversation_content, conversation_model = (
             self._generate_conversation(
                 turn,
+                social_context=social_context,
                 contextual_memories=contextual_memories,
             )
         )
@@ -557,6 +574,7 @@ class OllamaModelClient:
         self,
         turn: ConversationTurn,
         *,
+        social_context: SocialContext | None = None,
         contextual_memories: tuple[RetrievedMemory, ...] = (),
     ) -> tuple[str, str]:
         """Générer uniquement le texte naturel d'une conversation.
@@ -571,6 +589,7 @@ class OllamaModelClient:
                     self._identity,
                     self._person_context,
                     self._capability_context,
+                    social_context=social_context,
                     contextual_memories=(
                         bound_contextual_memories(
                             contextual_memories
@@ -600,6 +619,16 @@ class OllamaModelClient:
             )
 
         return normalized_content, model
+
+    def _retrieve_social_context(self) -> SocialContext | None:
+        """Lire le contexte de la personne active sans exposer son identifiant."""
+        person_id = self._person_context.active_person_id
+        if self._social_context_provider is None or person_id is None:
+            return None
+        try:
+            return self._social_context_provider.build(person_id)
+        except (DatabaseError, RepositoryError):
+            return None
 
     def _retrieve_contextual_memories(
         self,
