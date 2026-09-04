@@ -21,3 +21,7 @@ class TaskAlreadyCompletedError(RepositoryError):
 
 class MemoryNotFoundError(RepositoryError):
     """Signaler que le souvenir demandé n'existe pas."""
+
+
+class MemoryPersonLinkNotFoundError(RepositoryError):
+    """Signaler que l'association mémoire/personne demandée n'existe pas."""

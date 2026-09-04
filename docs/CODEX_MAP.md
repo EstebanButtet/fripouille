@@ -56,10 +56,11 @@ l'apprentissage et de l'état interne.
 
 | Fichier | Rôle |
 | --- | --- |
-| `src/assistant_ia/memory/models.py` | `Memory`, `MemoryCandidate` et modèles persistants. |
-| `src/assistant_ia/memory/memory_repository.py` | Persistance SQLite des souvenirs. |
-| `src/assistant_ia/memory/retrieval.py` | Rappel contextuel lexical borné. |
-| `src/assistant_ia/memory/promotion.py` | Proposition, doublon, correction et consentement. |
+| `src/assistant_ia/memory/models.py` | `Memory`, candidats et liens mémoire/personne. |
+| `src/assistant_ia/memory/memory_repository.py` | Souvenirs et associations SQLite inspectables. |
+| `src/assistant_ia/memory/retrieval.py` | Rappel lexical borné et isolé par personne. |
+| `src/assistant_ia/memory/promotion.py` | Promotion comparée dans un périmètre de sujet. |
+| `src/assistant_ia/memory/subjects.py` | Attribution déterministe au locuteur actif. |
 | `src/assistant_ia/intelligence/memory_candidates.py` | Analyse Ollama des candidats. |
 | `src/assistant_ia/memory/repository.py` | Connexion, schéma et chemin SQLite partagé. |
 
@@ -111,7 +112,8 @@ variante firmware expérimentale dans un commit IA.
 - Mémoire : `tests/test_memory_repository.py`,
   `tests/test_memory_retrieval.py`,
   `tests/test_memory_promotion_pipeline.py`,
-  `tests/test_memory_candidate_pipeline.py`.
+  `tests/test_memory_candidate_pipeline.py`, `tests/test_memory_people.py`,
+  `tests/test_memory_person_pipeline.py`, `tests/test_memory_subjects.py`.
 - Actions/sécurité : `tests/test_default_actions.py`,
   `tests/test_system_actions.py`.
 - Interfaces : `tests/test_terminal.py`, `tests/test_gui.py`,
@@ -123,6 +125,8 @@ variante firmware expérimentale dans un commit IA.
   `intelligence/prompt.py` + tests associés.
 - Rappel mémoire : `memory/retrieval.py` + `intelligence/model_client.py`.
 - Stockage mémoire : `memory/memory_repository.py`.
+- Rattachement mémoire/personne : `memory/models.py` +
+  `memory/memory_repository.py` + `memory/subjects.py`.
 - Interface utilisateur : `runtime.py` + `interfaces/`.
 - Actions PC : `actions/` + `security/`.
 - Identité stable : `identity/`.

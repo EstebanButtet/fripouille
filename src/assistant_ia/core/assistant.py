@@ -54,6 +54,7 @@ from assistant_ia.memory.promotion import (
     normalize_memory_equivalence,
 )
 from assistant_ia.memory.repository import DatabaseError
+from assistant_ia.memory.subjects import candidate_targets_active_person
 from assistant_ia.people.context import ActivePersonContext
 from assistant_ia.people.defaults import build_default_person
 from assistant_ia.people.models import PersonProfile
@@ -638,7 +639,19 @@ class AssistantCore:
 
         known_proposal: MemoryPromotionProposal | None = None
         for candidate in candidates:
-            proposal = self._memory_promotion_service.propose(candidate)
+            active_person_id = self._person_context.active_person_id
+            subject_person_id = (
+                active_person_id
+                if (
+                    active_person_id is not None
+                    and candidate_targets_active_person(candidate)
+                )
+                else None
+            )
+            proposal = self._memory_promotion_service.propose(
+                candidate,
+                subject_person_id=subject_person_id,
+            )
             if proposal.requires_confirmation:
                 return proposal
             if known_proposal is None:
@@ -675,6 +688,12 @@ class AssistantCore:
 
         if normalized_response in _MEMORY_CONFIRMATION_REFUSED:
             response = "D'accord, je ne conserverai pas cette information."
+        elif (
+            proposal.subject_person_id is not None
+            and self._person_context.active_person_id
+            != proposal.subject_person_id
+        ):
+            response = MEMORY_PROMOTION_ERROR_MESSAGE
         elif self._memory_promotion_service is None:
             response = MEMORY_PROMOTION_ERROR_MESSAGE
         else:

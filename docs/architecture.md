@@ -64,7 +64,7 @@ An intent is therefore a proposal, not an executed action.
 | Conversation | Temporary, bounded session history | Implemented |
 | People | Persistent person registry and the active speaker for the current session | Implemented through FRP-IA-04B |
 | Profile facts | Confirmed, person-scoped facts promoted from separate candidates | Implemented through FRP-IA-04C; no prompt injection yet |
-| Memory | Persistent user-confirmed facts plus contextual retrieval | Implemented |
+| Memory | Confirmed memories, optional person links and scoped contextual retrieval | Implemented through FRP-IA-04D |
 | Relationships | Persistent social profiles and relationship state | Not implemented |
 | Learning | Behavioral adaptation derived from experience | Not implemented |
 | Internal state | Persistent or evolving assistant state distinct from identity | Not implemented |
@@ -77,6 +77,14 @@ mutate `AssistantIdentity`. A `ProfileFactCandidate` is not a truth or a
 `Memory`: the application supplies its resolved person, classifies the
 operation and requires confirmation before persistence. Relationships remain
 separate and unimplemented.
+
+`Memory` remains independent from `Person`. A `MemoryPersonLink` records that
+a person is an explicit subject of a memory; no displayed name is resolved by
+this association layer. A memory may have no link, one subject or several
+subjects. Automatic retrieval receives the application-resolved active person
+ID and can see only that person's linked memories plus unassigned memories.
+Memories linked exclusively to another person are filtered before prompt
+construction.
 
 ## Authority boundary
 
@@ -105,8 +113,9 @@ The LLM has no GPIO, PWM, motor, serial-byte, or raw display API.
 ## Persistence and memory
 
 `SQLiteDatabase` owns connection lifecycle, transactions, schema checks, and
-migrations. Domain repositories own their SQL for tasks, journal entries, and
-memories. The current schema version is 3.
+migrations. Domain repositories own their SQL for tasks, journal entries,
+memories, people, profile facts, and memory/person links. The current schema
+version is 6.
 
 Manual memory actions are explicit. Automatic analysis first creates
 non-persistent candidates with source evidence. `MemoryPromotionService`

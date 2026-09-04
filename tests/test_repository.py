@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from assistant_ia.memory import repository as repository_module
+from assistant_ia.memory.memory_repository import MemoryRepository
 from assistant_ia.memory.repository import (
     CURRENT_SCHEMA_VERSION,
     DEFAULT_DATABASE_DIRECTORY_NAME,
@@ -18,6 +19,7 @@ from assistant_ia.memory.repository import (
     SQLiteDatabase,
     default_database_path,
 )
+from assistant_ia.memory.retrieval import ContextualMemoryRetriever
 from assistant_ia.people.defaults import (
     DEFAULT_PERSON_ID,
     DEFAULT_PERSON_NAME,
@@ -454,6 +456,45 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 (7, "Alice", "2026-08-07T04:00:00+00:00"),
             )
 
+    def _create_version_five_schema(
+        self,
+        *,
+        tasks: tuple[tuple[object, ...], ...] = (),
+        memories: tuple[tuple[int, str, str], ...] = (),
+        journal_entries: tuple[tuple[object, ...], ...] = (),
+    ) -> None:
+        """Create a populated v5 database through the real profile migration."""
+        self._create_version_four_schema(
+            tasks=tasks,
+            memories=memories,
+            journal_entries=journal_entries,
+        )
+        with self.database.connect() as connection:
+            repository_module._migrate_schema_4_to_5(connection)
+            connection.execute(
+                "UPDATE schema_version SET version = 5 WHERE id = 1"
+            )
+            connection.execute(
+                """
+                INSERT INTO profile_facts (
+                    id, person_id, category, content, source, source_text,
+                    confidence, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    8,
+                    7,
+                    "interest",
+                    "J'aime la robotique.",
+                    "explicit_user",
+                    None,
+                    1.0,
+                    "2026-08-07T05:00:00+00:00",
+                    "2026-08-07T05:00:00+00:00",
+                ),
+            )
+
     def _table_names(self) -> list[tuple[str]]:
         """Return all non-internal table names in deterministic order."""
         with self.database.connect() as connection:
@@ -509,6 +550,7 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
             [
                 ("journal_entries",),
                 ("memories",),
+                ("memory_people",),
                 ("persons",),
                 ("profile_facts",),
                 ("schema_version",),
@@ -817,6 +859,7 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
             [
                 ("journal_entries",),
                 ("memories",),
+                ("memory_people",),
                 ("persons",),
                 ("profile_facts",),
                 ("schema_version",),
@@ -910,6 +953,73 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
         self.assertIn(
             "idx_profile_facts_person_category",
             {row[1] for row in indexes},
+        )
+
+    def test_migrates_v5_to_v6_without_assigning_historical_memories(
+        self,
+    ) -> None:
+        """Existing memories stay unassigned while every v5 domain survives."""
+        task = (
+            3, "Tâche v5", None, "pending",
+            "2026-08-07T01:00:00+00:00", None,
+        )
+        memory = (4, "Souvenir historique.", "2026-08-07T02:00:00+00:00")
+        journal = (
+            5, "Journal v5.", "2026-08-07",
+            "2026-08-07T03:00:00+00:00",
+        )
+        self._create_version_five_schema(
+            tasks=(task,),
+            memories=(memory,),
+            journal_entries=(journal,),
+        )
+
+        self.database.initialize()
+
+        with self.database.connect() as connection:
+            version = connection.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            stored_task = connection.execute(
+                "SELECT title FROM tasks WHERE id = 3"
+            ).fetchone()
+            stored_memory = connection.execute(
+                "SELECT content FROM memories WHERE id = 4"
+            ).fetchone()
+            stored_journal = connection.execute(
+                "SELECT content FROM journal_entries WHERE id = 5"
+            ).fetchone()
+            stored_person = connection.execute(
+                "SELECT display_name FROM persons WHERE id = 7"
+            ).fetchone()
+            stored_profile_fact = connection.execute(
+                "SELECT content FROM profile_facts WHERE id = 8"
+            ).fetchone()
+            links = connection.execute(
+                "SELECT * FROM memory_people"
+            ).fetchall()
+
+        self.assertEqual(version, (CURRENT_SCHEMA_VERSION,))
+        self.assertEqual(stored_task, (task[1],))
+        self.assertEqual(stored_memory, (memory[1],))
+        self.assertEqual(stored_journal, (journal[1],))
+        self.assertEqual(stored_person, ("Alice",))
+        self.assertEqual(stored_profile_fact, ("J'aime la robotique.",))
+        self.assertEqual(links, [])
+        memory_repository = MemoryRepository(self.database)
+        self.assertEqual(
+            tuple(
+                item.id
+                for item in memory_repository.list_unassigned_memories()
+            ),
+            (memory[0],),
+        )
+        retrieved = ContextualMemoryRetriever(memory_repository).retrieve(
+            "souvenir historique"
+        )
+        self.assertEqual(
+            tuple(item.memory.id for item in retrieved),
+            (memory[0],),
         )
 
     def test_initialize_does_not_duplicate_default_person(self) -> None:

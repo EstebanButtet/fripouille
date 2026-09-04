@@ -618,6 +618,7 @@ class OllamaModelClient:
                 self._contextual_memory_retriever.retrieve(
                     user_message,
                     limit=MAX_INJECTED_CONTEXTUAL_MEMORIES,
+                    person_id=self._person_context.active_person_id,
                 )
             )
         except (DatabaseError, RepositoryError):

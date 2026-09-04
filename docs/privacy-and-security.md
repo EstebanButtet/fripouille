@@ -46,6 +46,12 @@ facts are persisted locally with an explicit person foreign key, provenance
 and confirmation; candidates are not treated as truth. Profile facts are not
 yet injected into prompts, and relationships are not implemented.
 
+Memory/person associations are explicit application data, never name matches
+or model-selected identifiers. Historical memories remain unassigned. During
+automatic contextual recall, the active person can receive their linked
+memories and relevant unassigned memories; memories linked only to another
+person are excluded in repository-backed retrieval before any prompt is built.
+
 ## Action authority
 
 The language model can propose only a name from a closed intent set and

@@ -1,7 +1,8 @@
 """Promotion contrôlée des candidats mémoire par l'application.
 
-Ce service compare un :class:`MemoryCandidate` non persistant aux souvenirs
-existants et propose une opération bornée : création, déjà connu, doublon
+Ce service compare un :class:`MemoryCandidate` non persistant aux souvenirs du
+même sujet, ou aux seuls souvenirs sans sujet, puis propose une opération
+bornée : création, déjà connu, doublon
 possible, correction ou conflit. Il ne demande pas lui-même le consentement ;
 ``AssistantCore`` présente la proposition et rappelle ensuite
 :meth:`MemoryPromotionService.apply_confirmed` après un oui explicite.
@@ -100,6 +101,7 @@ class MemoryPromotionProposal:
     operation: MemoryPromotionOperation
     candidate: MemoryCandidate
     related_memory: Memory | None = None
+    subject_person_id: int | None = None
 
     def __post_init__(self) -> None:
         """Valider l'opération et la présence cohérente du souvenir lié."""
@@ -115,6 +117,18 @@ class MemoryPromotionProposal:
             raise TypeError(
                 "Memory promotion requires a validated MemoryCandidate."
             )
+        if self.subject_person_id is not None:
+            if (
+                isinstance(self.subject_person_id, bool)
+                or not isinstance(self.subject_person_id, int)
+            ):
+                raise TypeError(
+                    "Memory promotion subject identifier must be an integer."
+                )
+            if self.subject_person_id < 1:
+                raise ValueError(
+                    "Memory promotion subject identifier must be positive."
+                )
 
         requires_related_memory = normalized_operation != "create"
         if requires_related_memory and not isinstance(
@@ -160,6 +174,8 @@ class MemoryPromotionService:
     def propose(
         self,
         candidate: MemoryCandidate,
+        *,
+        subject_person_id: int | None = None,
     ) -> MemoryPromotionProposal:
         """Classer un candidat validé sans effectuer d'écriture.
 
@@ -172,8 +188,15 @@ class MemoryPromotionService:
                 "Memory promotion requires a validated MemoryCandidate."
             )
 
-        memories = self._repository.list_memories(
-            limit=MAX_PROMOTION_COMPARISON_MEMORIES
+        memories = (
+            self._repository.list_unassigned_memories(
+                limit=MAX_PROMOTION_COMPARISON_MEMORIES
+            )
+            if subject_person_id is None
+            else self._repository.list_memories_for_person(
+                subject_person_id,
+                limit=MAX_PROMOTION_COMPARISON_MEMORIES,
+            )
         )
         candidate_equivalent = normalize_memory_equivalence(
             candidate.content
@@ -187,6 +210,7 @@ class MemoryPromotionService:
                     operation="already_known",
                     candidate=candidate,
                     related_memory=memory,
+                    subject_person_id=subject_person_id,
                 )
 
         # Ce classement est inspectable et stable : similarité d'abord, puis
@@ -211,6 +235,7 @@ class MemoryPromotionService:
                     operation="update",
                     candidate=candidate,
                     related_memory=correction_target,
+                    subject_person_id=subject_person_id,
                 )
 
         if ranked_memories:
@@ -224,6 +249,7 @@ class MemoryPromotionService:
                     operation="possible_duplicate",
                     candidate=candidate,
                     related_memory=closest_memory,
+                    subject_person_id=subject_person_id,
                 )
 
             if _has_shared_relation_anchor(
@@ -234,11 +260,13 @@ class MemoryPromotionService:
                     operation="conflict",
                     candidate=candidate,
                     related_memory=closest_memory,
+                    subject_person_id=subject_person_id,
                 )
 
         return MemoryPromotionProposal(
             operation="create",
             candidate=candidate,
+            subject_person_id=subject_person_id,
         )
 
     def apply_confirmed(
@@ -262,7 +290,10 @@ class MemoryPromotionService:
 
         # Contrôle optimiste : l'état de la base a pu changer pendant que
         # l'utilisateur répondait à la demande de confirmation.
-        current_proposal = self.propose(proposal.candidate)
+        current_proposal = self.propose(
+            proposal.candidate,
+            subject_person_id=proposal.subject_person_id,
+        )
 
         if current_proposal.operation == "already_known":
             if current_proposal.related_memory is None:
@@ -273,7 +304,10 @@ class MemoryPromotionService:
             raise ValueError("Memory promotion proposal is no longer current.")
 
         if proposal.operation in {"create", "possible_duplicate"}:
-            return self._repository.save_candidate(proposal.candidate)
+            return self._repository.save_candidate(
+                proposal.candidate,
+                subject_person_id=proposal.subject_person_id,
+            )
 
         current_memory = current_proposal.related_memory
         proposed_memory = proposal.related_memory

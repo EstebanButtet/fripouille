@@ -16,6 +16,8 @@ from assistant_ia.memory.promotion import (
     normalize_memory_equivalence,
 )
 from assistant_ia.memory.repository import SQLiteDatabase
+from assistant_ia.people.defaults import DEFAULT_PERSON_ID
+from assistant_ia.people.person_repository import PersonRepository
 
 
 class SequenceClock:
@@ -33,6 +35,10 @@ class MemoryPromotionTests(unittest.TestCase):
             Path(self.temporary_directory.name) / "assistant.db"
         )
         self.database.initialize()
+        person_repository = PersonRepository(self.database)
+        self.este = person_repository.get_person(DEFAULT_PERSON_ID)
+        assert self.este is not None
+        self.alice = person_repository.create_person("Alice")
         self.first_time = datetime(2026, 8, 28, tzinfo=timezone.utc)
         self.second_time = self.first_time + timedelta(hours=1)
         self.repository = MemoryRepository(
@@ -170,6 +176,47 @@ class MemoryPromotionTests(unittest.TestCase):
         self.assertEqual(
             normalize_memory_equivalence("  Café, PRÉFÉRÉ ! "),
             "cafe prefere",
+        )
+
+    def test_same_content_is_independent_for_two_people(self) -> None:
+        candidate = self._candidate("J'aime le café.")
+        este_memory = self.repository.save_candidate(
+            candidate,
+            subject_person_id=self.este.id,
+        )
+
+        alice_proposal = self.service.propose(
+            candidate,
+            subject_person_id=self.alice.id,
+        )
+
+        self.assertEqual(alice_proposal.operation, "create")
+        alice_memory = self.service.apply_confirmed(alice_proposal)
+        self.assertNotEqual(alice_memory.id, este_memory.id)
+        self.assertEqual(
+            self.service.propose(
+                candidate,
+                subject_person_id=self.alice.id,
+            ).operation,
+            "already_known",
+        )
+
+    def test_personal_and_unassigned_comparison_scopes_are_separate(
+        self,
+    ) -> None:
+        candidate = self._candidate("Projet Fripouille durable.")
+        general = self.repository.save_memory(candidate.content)
+
+        personal_proposal = self.service.propose(
+            candidate,
+            subject_person_id=self.este.id,
+        )
+
+        self.assertEqual(personal_proposal.operation, "create")
+        self.assertEqual(personal_proposal.subject_person_id, self.este.id)
+        self.assertEqual(
+            self.service.propose(candidate).related_memory,
+            general,
         )
 
 

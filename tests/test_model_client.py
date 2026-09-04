@@ -26,6 +26,9 @@ from assistant_ia.intelligence.prompt import (
 from assistant_ia.memory.memory_repository import MemoryRepository
 from assistant_ia.memory.repository import DatabaseError, SQLiteDatabase
 from assistant_ia.memory.retrieval import ContextualMemoryRetriever
+from assistant_ia.people.context import ActivePersonContext
+from assistant_ia.people.defaults import DEFAULT_PERSON_ID
+from assistant_ia.people.person_repository import PersonRepository
 
 
 class FakeHTTPResponse:
@@ -672,10 +675,11 @@ class OllamaModelClientTests(unittest.TestCase):
                     contextual_memory_retriever=retriever,
                 ).generate_response(messages)
 
-        retrieve.assert_called_once_with(
-            messages[-1].content,
-            limit=5,
-        )
+            retrieve.assert_called_once_with(
+                messages[-1].content,
+                limit=5,
+                person_id=None,
+            )
         interpretation_prompt = (
             captured_payloads[0]["messages"][0]["content"]
         )
@@ -702,6 +706,50 @@ class OllamaModelClientTests(unittest.TestCase):
             messages[-1].content,
             "Quel logiciel utiliser pour la CAO ?",
         )
+
+    def test_retrieval_receives_persistent_active_person_id(self) -> None:
+        """The model client should pass only the application-resolved ID."""
+        messages = (
+            ConversationMessage(role="user", content="Parle-moi du projet."),
+        )
+        _payloads, fake_urlopen = build_two_stage_urlopen()
+
+        with tempfile.TemporaryDirectory() as directory:
+            database = SQLiteDatabase(Path(directory) / "assistant.db")
+            database.initialize()
+            person_repository = PersonRepository(database)
+            este = person_repository.get_person(DEFAULT_PERSON_ID)
+            assert este is not None
+            repository = MemoryRepository(database)
+            retriever = ContextualMemoryRetriever(repository)
+            identity = build_default_identity()
+            person_context = ActivePersonContext(
+                assistant_name=identity.name,
+                default_person=este,
+            )
+
+            with (
+                patch.object(
+                    retriever,
+                    "retrieve",
+                    wraps=retriever.retrieve,
+                ) as retrieve,
+                patch(
+                    "assistant_ia.intelligence.model_client.urlopen",
+                    side_effect=fake_urlopen,
+                ),
+            ):
+                OllamaModelClient(
+                    identity=identity,
+                    person_context=person_context,
+                    contextual_memory_retriever=retriever,
+                ).generate_response(messages)
+
+            retrieve.assert_called_once_with(
+                messages[-1].content,
+                limit=5,
+                person_id=este.id,
+            )
 
     def test_no_match_does_not_add_contextual_prompt_section(self) -> None:
         """An irrelevant store should leave natural generation unchanged."""

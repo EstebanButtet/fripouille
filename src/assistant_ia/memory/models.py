@@ -1,4 +1,4 @@
-"""Modèles métier persistants des tâches, souvenirs et entrées de journal.
+"""Modèles persistants des tâches, souvenirs, liens et entrées de journal.
 
 Ces dataclasses immuables représentent les lignes SQLite après validation.
 Elles centralisent les invariants afin qu'un repository ne puisse pas remettre
@@ -30,6 +30,16 @@ MemorySource = Literal[
     "explicit_user",
     "conversation_analysis",
 ]
+
+MemoryPersonRole = Literal[
+    "subject",
+]
+
+ALLOWED_MEMORY_PERSON_ROLES: frozenset[str] = frozenset(
+    {
+        "subject",
+    }
+)
 
 ALLOWED_MEMORY_SOURCES: frozenset[str] = frozenset(
     {
@@ -220,6 +230,37 @@ class MemoryCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class MemoryPersonLink:
+    """Relier explicitement un souvenir à une personne qui en est le sujet.
+
+    Le rôle unique ``subject`` suffit à FRP-IA-04D. Plusieurs personnes
+    peuvent être sujets du même souvenir ; aucun lien n'est déduit d'un nom.
+    """
+
+    memory_id: int
+    person_id: int
+    role: MemoryPersonRole = "subject"
+
+    def __post_init__(self) -> None:
+        """Valider les deux identifiants et le rôle borné de l'association."""
+        object.__setattr__(
+            self,
+            "memory_id",
+            _validate_identifier(self.memory_id),
+        )
+        object.__setattr__(
+            self,
+            "person_id",
+            _validate_identifier(self.person_id),
+        )
+        object.__setattr__(
+            self,
+            "role",
+            _normalize_memory_person_role(self.role),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class JournalEntry:
     """Représenter une entrée de journal persistée.
 
@@ -342,6 +383,22 @@ def _normalize_memory_source(
         )
 
     return cast(MemorySource, normalized_source)
+
+
+def _normalize_memory_person_role(
+    role: MemoryPersonRole,
+) -> MemoryPersonRole:
+    """Retourner un rôle d'association appartenant à la liste fermée."""
+    if not isinstance(role, str):
+        raise TypeError("Memory person role must be a string.")
+
+    normalized_role = role.strip()
+    if normalized_role not in ALLOWED_MEMORY_PERSON_ROLES:
+        raise ValueError(
+            f"Unknown memory person role: {normalized_role!r}."
+        )
+
+    return cast(MemoryPersonRole, normalized_role)
 
 
 def _validate_optional_source_text(

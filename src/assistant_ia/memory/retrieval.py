@@ -165,26 +165,47 @@ class ContextualMemoryRetriever:
         self,
         query: str,
         limit: int = DEFAULT_CONTEXTUAL_MEMORY_LIMIT,
+        *,
+        person_id: int | None = None,
     ) -> tuple[RetrievedMemory, ...]:
         """Retourner les correspondances lexicales les plus fortes.
 
-        Les égalités sont départagées par confiance d'enregistrement, date de
-        création puis identifiant. Une requête sans terme significatif ne
-        rappelle rien, plutôt que de choisir des souvenirs arbitraires.
+        Les souvenirs du sujet actif précèdent les souvenirs généraux ; ceux
+        d'autres personnes sont absents de la vue. Dans chaque périmètre, les
+        égalités sont départagées par confiance, date puis identifiant.
         """
         query_terms = _useful_terms(query)
         normalized_limit = _validate_retrieval_limit(limit)
+        normalized_person_id = _validate_optional_person_id(person_id)
 
         if not query_terms:
             return ()
 
-        matches: list[RetrievedMemory] = []
+        scoped_memories: list[tuple[Memory, int]] = []
+        if normalized_person_id is not None:
+            person_memories = self._repository.list_memories_for_person(
+                normalized_person_id,
+                limit=self._candidate_limit,
+            )
+            scoped_memories.extend(
+                (memory, 1) for memory in person_memories
+            )
+        remaining_candidate_count = (
+            self._candidate_limit - len(scoped_memories)
+        )
+        if remaining_candidate_count > 0:
+            scoped_memories.extend(
+                (memory, 0)
+                for memory in self._repository.list_unassigned_memories(
+                    limit=remaining_candidate_count,
+                )
+            )
+
+        matches: list[tuple[RetrievedMemory, int]] = []
 
         # Le score est calculé localement sur des ensembles de mots ; Ollama
         # n'intervient ni dans la sélection ni dans son ordre.
-        for memory in self._repository.list_memories(
-            limit=self._candidate_limit,
-        ):
+        for memory, scope_priority in scoped_memories:
             memory_terms = _useful_terms(memory.content)
             matched_terms = tuple(
                 sorted(query_terms.intersection(memory_terms))
@@ -194,24 +215,31 @@ class ContextualMemoryRetriever:
                 continue
 
             matches.append(
-                RetrievedMemory(
-                    memory=memory,
-                    score=len(matched_terms) / len(query_terms),
-                    matched_terms=matched_terms,
+                (
+                    RetrievedMemory(
+                        memory=memory,
+                        score=len(matched_terms) / len(query_terms),
+                        matched_terms=matched_terms,
+                    ),
+                    scope_priority,
                 )
             )
 
         matches.sort(
-            key=lambda match: (
-                match.score,
-                match.memory.confidence,
-                match.memory.created_at,
-                match.memory.id,
+            key=lambda scoped_match: (
+                scoped_match[1],
+                scoped_match[0].score,
+                scoped_match[0].memory.confidence,
+                scoped_match[0].memory.created_at,
+                scoped_match[0].memory.id,
             ),
             reverse=True,
         )
 
-        return tuple(matches[:normalized_limit])
+        return tuple(
+            match
+            for match, _scope_priority in matches[:normalized_limit]
+        )
 
 
 def bound_contextual_memories(
@@ -293,3 +321,14 @@ def _validate_retrieval_limit(limit: int) -> int:
         )
 
     return limit
+
+
+def _validate_optional_person_id(person_id: int | None) -> int | None:
+    """Valider le sujet applicatif facultatif du rappel contextuel."""
+    if person_id is None:
+        return None
+    if isinstance(person_id, bool) or not isinstance(person_id, int):
+        raise TypeError("Memory retrieval person identifier must be an integer.")
+    if person_id < 1:
+        raise ValueError("Memory retrieval person identifier must be positive.")
+    return person_id

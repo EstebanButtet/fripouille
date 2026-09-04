@@ -789,9 +789,9 @@ def render_contextual_memories(
 ) -> str:
     """Sérialiser les souvenirs sélectionnés en JSON non autoritatif.
 
-    Le score de rappel n'est volontairement pas transmis : le modèle reçoit
-    le contenu métier validé, pas les détails de classement internes. Cette
-    fonction n'effectue aucune lecture de base.
+    Le score de rappel et les identifiants persistants ne sont volontairement
+    pas transmis : le modèle reçoit le contenu métier validé, pas les détails
+    de classement internes. Cette fonction n'effectue aucune lecture de base.
     """
     if not isinstance(memories, tuple):
         raise TypeError(
@@ -811,7 +811,6 @@ def render_contextual_memories(
         memory = retrieved_memory.memory
         serialized_memories.append(
             {
-                "id": memory.id,
                 "content": memory.content,
                 "source": memory.source,
                 "confidence": memory.confidence,

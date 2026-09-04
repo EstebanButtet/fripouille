@@ -10,6 +10,8 @@ from pathlib import Path
 from assistant_ia.memory.memory_repository import MemoryRepository
 from assistant_ia.memory.repository import SQLiteDatabase
 from assistant_ia.memory.retrieval import ContextualMemoryRetriever
+from assistant_ia.people.defaults import DEFAULT_PERSON_ID
+from assistant_ia.people.person_repository import PersonRepository
 
 
 class SequenceClock:
@@ -300,6 +302,99 @@ class ContextualMemoryRetrieverTests(unittest.TestCase):
             ),
             ("Examen de biologie.",),
         )
+
+    def test_active_person_retrieval_is_symmetric_and_allows_shared_memories(
+        self,
+    ) -> None:
+        person_repository = PersonRepository(self.database)
+        este = person_repository.get_person(DEFAULT_PERSON_ID)
+        assert este is not None
+        alice = person_repository.create_person("Alice")
+        repository = MemoryRepository(
+            self.database,
+            clock=SequenceClock(
+                self.base_time,
+                self.base_time + timedelta(minutes=1),
+                self.base_time + timedelta(minutes=2),
+                self.base_time + timedelta(minutes=3),
+            ),
+        )
+        este_memory = repository.save_memory("Projet privé d'Este.")
+        alice_memory = repository.save_memory("Projet privé d'Alice.")
+        general_memory = repository.save_memory("Projet général Fripouille.")
+        shared_memory = repository.save_memory("Projet partagé à Genève.")
+        repository.link_person(este_memory.id, este.id)
+        repository.link_person(alice_memory.id, alice.id)
+        repository.link_person(shared_memory.id, este.id)
+        repository.link_person(shared_memory.id, alice.id)
+        retriever = ContextualMemoryRetriever(repository)
+
+        este_results = retriever.retrieve("projet", person_id=este.id)
+        alice_results = retriever.retrieve("projet", person_id=alice.id)
+
+        self.assertEqual(
+            tuple(result.memory for result in este_results),
+            (shared_memory, este_memory, general_memory),
+        )
+        self.assertNotIn(
+            alice_memory,
+            tuple(result.memory for result in este_results),
+        )
+        self.assertEqual(
+            tuple(result.memory for result in alice_results),
+            (shared_memory, alice_memory, general_memory),
+        )
+        self.assertNotIn(
+            este_memory,
+            tuple(result.memory for result in alice_results),
+        )
+
+    def test_unresolved_retrieval_sees_only_unassigned_memories(self) -> None:
+        person_repository = PersonRepository(self.database)
+        este = person_repository.get_person(DEFAULT_PERSON_ID)
+        assert este is not None
+        repository = MemoryRepository(
+            self.database,
+            clock=SequenceClock(
+                self.base_time,
+                self.base_time + timedelta(minutes=1),
+            ),
+        )
+        private_memory = repository.save_memory("Biologie privée.")
+        general_memory = repository.save_memory("Biologie générale.")
+        repository.link_person(private_memory.id, este.id)
+        retriever = ContextualMemoryRetriever(repository)
+
+        results = retriever.retrieve("biologie")
+
+        self.assertEqual(
+            tuple(result.memory for result in results),
+            (general_memory,),
+        )
+
+    def test_person_memories_have_priority_over_general_matches(self) -> None:
+        person_repository = PersonRepository(self.database)
+        este = person_repository.get_person(DEFAULT_PERSON_ID)
+        assert este is not None
+        repository = MemoryRepository(
+            self.database,
+            clock=SequenceClock(
+                self.base_time,
+                self.base_time + timedelta(minutes=1),
+            ),
+        )
+        personal = repository.save_memory("Projet personnel.")
+        general = repository.save_memory("Projet robotique Fripouille.")
+        repository.link_person(personal.id, este.id)
+        retriever = ContextualMemoryRetriever(repository)
+
+        results = retriever.retrieve(
+            "projet robotique Fripouille",
+            person_id=este.id,
+        )
+
+        self.assertEqual(results[0].memory, personal)
+        self.assertEqual(results[1].memory, general)
 
 
 if __name__ == "__main__":

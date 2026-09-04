@@ -146,11 +146,16 @@ class MemoryCandidateAnalyzerTests(unittest.TestCase):
         candidate_array = MEMORY_CANDIDATE_RESPONSE_SCHEMA[
             "properties"
         ]["candidates"]
+        candidate_properties = candidate_array["items"]["properties"]
         self.assertFalse(
             MEMORY_CANDIDATE_RESPONSE_SCHEMA["additionalProperties"]
         )
         self.assertEqual(candidate_array["maxItems"], 2)
         self.assertFalse(candidate_array["items"]["additionalProperties"])
+        self.assertEqual(
+            set(candidate_properties),
+            {"content", "source_text", "confidence"},
+        )
         self.assertEqual(MIN_MEMORY_CANDIDATE_CONFIDENCE, 0.8)
 
     def test_prefilters_non_assertive_or_out_of_scope_messages(self) -> None:

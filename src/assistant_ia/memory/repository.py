@@ -2,8 +2,9 @@
 
 ``SQLiteDatabase`` possède le chemin, ouvre des connexions transactionnelles,
 active les clés étrangères et gère les migrations de schéma. Les repositories
-de tâches, mémoire, journal, personnes et faits de profil utilisent cette
-infrastructure mais gardent leur SQL métier dans leurs propres modules.
+de tâches, mémoire, journal, personnes, faits de profil et associations
+utilisent cette infrastructure mais gardent leur SQL métier dans leurs propres
+modules.
 
 Une transaction couvre chaque bloc ``with database.connect()`` : une sortie
 normale valide les écritures, tandis qu'une exception provoque leur annulation
@@ -28,7 +29,7 @@ DEFAULT_DATABASE_DIRECTORY_NAME = "assistant-ia"
 DEFAULT_DATABASE_FILENAME = "assistant_ia.db"
 
 _INITIAL_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 _SCHEMA_VERSION_COLUMNS = (
     ("id", "INTEGER", 0, 1),
@@ -74,6 +75,11 @@ _BUSINESS_TABLE_COLUMNS = {
         ("confidence", "REAL", 1, 0),
         ("created_at", "TEXT", 1, 0),
         ("updated_at", "TEXT", 1, 0),
+    ),
+    "memory_people": (
+        ("memory_id", "INTEGER", 1, 1),
+        ("person_id", "INTEGER", 1, 2),
+        ("role", "TEXT", 1, 3),
     ),
 }
 
@@ -484,6 +490,31 @@ def _migrate_schema_4_to_5(
     )
 
 
+def _migrate_schema_5_to_6(
+    connection: sqlite3.Connection,
+) -> None:
+    """Relier explicitement mémoires et personnes sans inventer de sujet."""
+    connection.execute(
+        """
+        CREATE TABLE memory_people (
+            memory_id INTEGER NOT NULL
+                REFERENCES memories(id) ON DELETE CASCADE,
+            person_id INTEGER NOT NULL
+                REFERENCES persons(id) ON DELETE CASCADE,
+            role TEXT NOT NULL
+                CHECK (role IN ('subject')),
+            PRIMARY KEY (memory_id, person_id, role)
+        )
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX idx_memory_people_person_id
+        ON memory_people (person_id, role, memory_id)
+        """
+    )
+
+
 def _ensure_default_person(
     connection: sqlite3.Connection,
 ) -> None:
@@ -572,6 +603,7 @@ _SCHEMA_MIGRATIONS = {
     2: _migrate_schema_2_to_3,
     3: _migrate_schema_3_to_4,
     4: _migrate_schema_4_to_5,
+    5: _migrate_schema_5_to_6,
 }
 
 

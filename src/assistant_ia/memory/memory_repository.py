@@ -1,9 +1,9 @@
-"""Repository SQLite des souvenirs persistants de Fripouille.
+"""Repository SQLite des souvenirs et de leurs associations aux personnes.
 
 Un repository traduit les opérations métier (« enregistrer », « chercher »,
-« corriger », « supprimer ») en SQL paramétré, puis reconstruit des modèles
-:class:`Memory` validés. Il est la seule couche de ce domaine autorisée à
-connaître les lignes SQLite ; le coeur et la promotion manipulent des objets.
+« corriger », « supprimer », « associer ») en SQL paramétré, puis reconstruit
+des modèles validés. Il est la seule couche de ce domaine autorisée à connaître
+les lignes SQLite ; le coeur et la promotion manipulent des objets.
 """
 
 from __future__ import annotations
@@ -14,14 +14,18 @@ from typing import cast
 
 from assistant_ia.memory.errors import (
     MemoryNotFoundError,
+    MemoryPersonLinkNotFoundError,
     RepositoryError,
 )
 from assistant_ia.memory.models import (
     Memory,
     MemoryCandidate,
+    MemoryPersonLink,
+    MemoryPersonRole,
     MemorySource,
 )
 from assistant_ia.memory.repository import SQLiteDatabase
+from assistant_ia.people.models import Person
 
 DEFAULT_MEMORY_RESULT_LIMIT = 20
 MAX_MEMORY_RESULT_LIMIT = 100
@@ -133,16 +137,27 @@ class MemoryRepository:
 
         return _memory_from_row(memory_row)
 
-    def save_candidate(self, candidate: MemoryCandidate) -> Memory:
+    def save_candidate(
+        self,
+        candidate: MemoryCandidate,
+        *,
+        subject_person_id: int | None = None,
+    ) -> Memory:
         """Persister un candidat conversationnel explicitement confirmé.
 
         La preuve et la confiance calculées pendant l'analyse sont conservées
-        avec la provenance ``conversation_analysis``.
+        avec la provenance ``conversation_analysis``. Le sujet facultatif est
+        fourni par l'application et son lien est créé dans la même transaction.
         """
         if not isinstance(candidate, MemoryCandidate):
             raise TypeError(
                 "Candidate persistence requires a MemoryCandidate."
             )
+        normalized_person_id = (
+            None
+            if subject_person_id is None
+            else _validate_person_identifier(subject_person_id)
+        )
 
         created_at = _normalize_datetime(
             self._clock(),
@@ -181,6 +196,15 @@ class MemoryRepository:
                     "Created memory identifier is invalid."
                 )
 
+            if normalized_person_id is not None:
+                connection.execute(
+                    """
+                    INSERT INTO memory_people (memory_id, person_id, role)
+                    VALUES (?, ?, ?)
+                    """,
+                    (memory_id, normalized_person_id, "subject"),
+                )
+
             memory_row = connection.execute(
                 f"""
                 {_MEMORY_SELECT_COLUMNS}
@@ -190,6 +214,152 @@ class MemoryRepository:
             ).fetchone()
 
         return _memory_from_row(memory_row)
+
+    def link_person(
+        self,
+        memory_id: int,
+        person_id: int,
+        role: MemoryPersonRole = "subject",
+    ) -> MemoryPersonLink:
+        """Créer idempotemment une association explicite mémoire/personne."""
+        link = MemoryPersonLink(
+            memory_id=_validate_identifier(memory_id),
+            person_id=_validate_person_identifier(person_id),
+            role=role,
+        )
+
+        with self._database.connect() as connection:
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO memory_people (
+                    memory_id,
+                    person_id,
+                    role
+                )
+                VALUES (?, ?, ?)
+                """,
+                (link.memory_id, link.person_id, link.role),
+            )
+            row = connection.execute(
+                """
+                SELECT memory_id, person_id, role
+                FROM memory_people
+                WHERE memory_id = ? AND person_id = ? AND role = ?
+                """,
+                (link.memory_id, link.person_id, link.role),
+            ).fetchone()
+
+        return _memory_person_link_from_row(row)
+
+    def unlink_person(
+        self,
+        memory_id: int,
+        person_id: int,
+        role: MemoryPersonRole = "subject",
+    ) -> MemoryPersonLink:
+        """Retirer exactement un lien et retourner son état supprimé."""
+        link = MemoryPersonLink(
+            memory_id=_validate_identifier(memory_id),
+            person_id=_validate_person_identifier(person_id),
+            role=role,
+        )
+
+        with self._database.connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM memory_people
+                WHERE memory_id = ? AND person_id = ? AND role = ?
+                """,
+                (link.memory_id, link.person_id, link.role),
+            )
+            if cursor.rowcount != 1:
+                raise MemoryPersonLinkNotFoundError(
+                    "Memory person link does not exist."
+                )
+
+        return link
+
+    def list_person_links(
+        self,
+        memory_id: int,
+    ) -> tuple[MemoryPersonLink, ...]:
+        """Lister les personnes explicitement associées à une mémoire."""
+        normalized_memory_id = _validate_identifier(memory_id)
+        with self._database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT memory_id, person_id, role
+                FROM memory_people
+                WHERE memory_id = ?
+                ORDER BY person_id, role
+                """,
+                (normalized_memory_id,),
+            ).fetchall()
+        return tuple(_memory_person_link_from_row(row) for row in rows)
+
+    def list_people_for_memory(
+        self,
+        memory_id: int,
+    ) -> tuple[Person, ...]:
+        """Lister les personnes associées à une mémoire, par identifiant."""
+        normalized_memory_id = _validate_identifier(memory_id)
+        with self._database.connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT persons.id, persons.display_name, persons.created_at
+                FROM persons
+                INNER JOIN memory_people
+                    ON memory_people.person_id = persons.id
+                WHERE memory_people.memory_id = ?
+                ORDER BY persons.id
+                """,
+                (normalized_memory_id,),
+            ).fetchall()
+        return tuple(_person_from_row(row) for row in rows)
+
+    def list_memories_for_person(
+        self,
+        person_id: int,
+        limit: int = DEFAULT_MEMORY_LIST_LIMIT,
+    ) -> tuple[Memory, ...]:
+        """Lister uniquement les souvenirs liés à la personne demandée."""
+        normalized_person_id = _validate_person_identifier(person_id)
+        normalized_limit = _validate_list_limit(limit)
+        with self._database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                {_MEMORY_SELECT_COLUMNS}
+                INNER JOIN memory_people
+                    ON memory_people.memory_id = memories.id
+                WHERE memory_people.person_id = ?
+                ORDER BY memories.created_at DESC, memories.id DESC
+                LIMIT ?
+                """,
+                (normalized_person_id, normalized_limit),
+            ).fetchall()
+        return tuple(_memory_from_row(row) for row in rows)
+
+    def list_unassigned_memories(
+        self,
+        limit: int = DEFAULT_MEMORY_LIST_LIMIT,
+    ) -> tuple[Memory, ...]:
+        """Lister les souvenirs généraux ne portant aucune association."""
+        normalized_limit = _validate_list_limit(limit)
+        with self._database.connect() as connection:
+            rows = connection.execute(
+                f"""
+                {_MEMORY_SELECT_COLUMNS}
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM memory_people
+                    WHERE memory_people.memory_id = memories.id
+                )
+                ORDER BY memories.created_at DESC, memories.id DESC
+                LIMIT ?
+                """,
+                (normalized_limit,),
+            ).fetchall()
+        return tuple(_memory_from_row(row) for row in rows)
 
     def update_memory(
         self,
@@ -413,6 +583,41 @@ def _memory_from_row(
         ) from error
 
 
+def _memory_person_link_from_row(
+    row: tuple[object, ...] | None,
+) -> MemoryPersonLink:
+    """Convertir une ligne d'association en modèle validé."""
+    if row is None or len(row) != 3:
+        raise RepositoryError("Stored memory person link is incomplete.")
+    try:
+        return MemoryPersonLink(
+            memory_id=cast(int, row[0]),
+            person_id=cast(int, row[1]),
+            role=cast(MemoryPersonRole, row[2]),
+        )
+    except (TypeError, ValueError) as error:
+        raise RepositoryError("Stored memory person link is invalid.") from error
+
+
+def _person_from_row(
+    row: tuple[object, ...] | None,
+) -> Person:
+    """Convertir une personne liée en modèle validé sans résoudre son nom."""
+    if row is None or len(row) != 3:
+        raise RepositoryError("Stored linked person data is incomplete.")
+    try:
+        return Person(
+            id=cast(int, row[0]),
+            display_name=cast(str, row[1]),
+            created_at=_parse_datetime(
+                row[2],
+                field_name="Stored linked person creation time",
+            ),
+        )
+    except (TypeError, ValueError) as error:
+        raise RepositoryError("Stored linked person data is invalid.") from error
+
+
 def _normalize_required_text(
     value: str,
     *,
@@ -447,6 +652,15 @@ def _validate_identifier(memory_id: int) -> int:
         )
 
     return memory_id
+
+
+def _validate_person_identifier(person_id: int) -> int:
+    """Retourner un identifiant de personne entier strictement positif."""
+    if isinstance(person_id, bool) or not isinstance(person_id, int):
+        raise TypeError("Person identifier must be an integer.")
+    if person_id < 1:
+        raise ValueError("Person identifier must be greater than zero.")
+    return person_id
 
 
 def _validate_result_limit(limit: int) -> int:
