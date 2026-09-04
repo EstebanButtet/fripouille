@@ -72,7 +72,7 @@ git diff --check
 git status --short
 ```
 
-The current baseline contains 681 passing tests. The number is descriptive,
+The current baseline contains 695 passing tests. The number is descriptive,
 not a fixed target: new behavior should add or adapt focused tests.
 
 ## Design principles

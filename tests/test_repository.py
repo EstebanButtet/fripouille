@@ -543,6 +543,27 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 ),
             )
 
+    def _create_version_eight_schema(self) -> None:
+        self._create_version_seven_schema()
+        with self.database.connect() as connection:
+            repository_module._migrate_schema_7_to_8(connection)
+            connection.execute("UPDATE schema_version SET version = 8 WHERE id = 1")
+            connection.execute(
+                """
+                INSERT INTO behavioral_experiences (
+                    id, person_id, context, objective, strategy, result,
+                    evaluation, source_type, source_reference, source_text,
+                    status, invalidation_reason, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    11, 7, "Contexte v8", "Objectif v8", "Stratégie v8",
+                    "Résultat v8", None, "manual_entry", "fixture-v8", None,
+                    "active", None, "2026-09-04T10:00:00+00:00",
+                    "2026-09-04T10:00:00+00:00",
+                ),
+            )
+
     def _table_names(self) -> list[tuple[str]]:
         """Return all non-internal table names in deterministic order."""
         with self.database.connect() as connection:
@@ -1153,6 +1174,26 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
         self.assertEqual(experiences, [])
         self.assertEqual(candidates, [])
         self.assertEqual(sources, [])
+
+    def test_migrates_v8_to_v9_preserving_experience(self) -> None:
+        self._create_version_eight_schema()
+        self.database.initialize()
+        with self.database.connect() as connection:
+            version = connection.execute(
+                "SELECT version FROM schema_version WHERE id = 1"
+            ).fetchone()
+            row = connection.execute(
+                """
+                SELECT context, outcome_status, outcome_kind, result_code,
+                       feedback_kind, feedback_text, measurements_json
+                FROM behavioral_experiences WHERE id = 11
+                """
+            ).fetchone()
+        self.assertEqual(version, (CURRENT_SCHEMA_VERSION,))
+        self.assertEqual(
+            row,
+            ("Contexte v8", "unknown", "reported_result", None, None, None, "[]"),
+        )
 
     def test_initialize_does_not_duplicate_default_person(self) -> None:
         """Repeated storage initialization should retain one default row."""

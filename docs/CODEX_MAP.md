@@ -72,9 +72,10 @@ l'apprentissage et de l'état interne.
 
 | Fichier | Rôle |
 | --- | --- |
-| `src/assistant_ia/learning/models.py` | Expériences, provenance structurée et leçons candidates sans règle confirmée. |
+| `src/assistant_ia/learning/models.py` | Expériences, provenance structurée, issues et leçons candidates sans règle confirmée. |
+| `src/assistant_ia/learning/outcomes.py` | Tentatives, résultats vérifiés, feedback explicite et mesures factuelles. |
 | `src/assistant_ia/learning/repository.py` | Persistance, traçabilité, correction, invalidation et suppression contrôlée. |
-| `src/assistant_ia/learning/service.py` | Portée applicative globale ou liée à la personne active résolue. |
+| `src/assistant_ia/learning/service.py` | Tentatives et retours explicitement enregistrés dans la portée globale ou active résolue. |
 
 FRP-IA-05 ne déclenche aucun apprentissage automatique et n'injecte aucune
 leçon dans le prompt. L'évaluation approfondie et la consolidation restent

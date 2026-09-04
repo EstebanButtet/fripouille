@@ -29,7 +29,7 @@ DEFAULT_DATABASE_DIRECTORY_NAME = "assistant-ia"
 DEFAULT_DATABASE_FILENAME = "assistant_ia.db"
 
 _INITIAL_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 
 _SCHEMA_VERSION_COLUMNS = (
     ("id", "INTEGER", 0, 1),
@@ -114,6 +114,12 @@ _BUSINESS_TABLE_COLUMNS = {
         ("invalidation_reason", "TEXT", 0, 0),
         ("created_at", "TEXT", 1, 0),
         ("updated_at", "TEXT", 1, 0),
+        ("outcome_status", "TEXT", 1, 0),
+        ("outcome_kind", "TEXT", 1, 0),
+        ("result_code", "TEXT", 0, 0),
+        ("feedback_kind", "TEXT", 0, 0),
+        ("feedback_text", "TEXT", 0, 0),
+        ("measurements_json", "TEXT", 1, 0),
     ),
     "behavioral_lesson_candidates": (
         ("id", "INTEGER", 0, 1),
@@ -681,6 +687,74 @@ def _migrate_schema_7_to_8(
         )
         """
     )
+    _create_behavioral_lesson_tables(connection)
+
+
+def _migrate_schema_8_to_9(
+    connection: sqlite3.Connection,
+) -> None:
+    """Structurer les issues et feedbacks sans inventer de données v8."""
+    connection.execute(
+        """
+        ALTER TABLE behavioral_experiences
+        ADD COLUMN outcome_status TEXT NOT NULL DEFAULT 'unknown'
+            CHECK (outcome_status IN (
+                'success', 'failure', 'partial', 'unknown', 'not_executed'
+            ))
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE behavioral_experiences
+        ADD COLUMN outcome_kind TEXT NOT NULL DEFAULT 'reported_result'
+            CHECK (outcome_kind IN (
+                'reported_result',
+                'verified_action',
+                'technical_error',
+                'user_feedback',
+                'external_result'
+            ))
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE behavioral_experiences
+        ADD COLUMN result_code TEXT
+            CHECK (result_code IS NULL OR length(trim(result_code)) > 0)
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE behavioral_experiences
+        ADD COLUMN feedback_kind TEXT
+            CHECK (
+                feedback_kind IS NULL
+                OR feedback_kind IN (
+                    'approval', 'disapproval', 'correction', 'retry_request'
+                )
+            )
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE behavioral_experiences
+        ADD COLUMN feedback_text TEXT
+            CHECK (feedback_text IS NULL OR length(trim(feedback_text)) > 0)
+        """
+    )
+    connection.execute(
+        """
+        ALTER TABLE behavioral_experiences
+        ADD COLUMN measurements_json TEXT NOT NULL DEFAULT '[]'
+            CHECK (length(trim(measurements_json)) > 0)
+        """
+    )
+
+
+def _create_behavioral_lesson_tables(
+    connection: sqlite3.Connection,
+) -> None:
+    """Créer les index et tables candidates appartenant au schéma v8."""
     connection.execute(
         """
         CREATE INDEX idx_behavioral_experiences_person_created
@@ -839,6 +913,7 @@ _SCHEMA_MIGRATIONS = {
     5: _migrate_schema_5_to_6,
     6: _migrate_schema_6_to_7,
     7: _migrate_schema_7_to_8,
+    8: _migrate_schema_8_to_9,
 }
 
 

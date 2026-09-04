@@ -14,8 +14,10 @@ from assistant_ia.core.context import ConversationMessage
 from assistant_ia.intelligence.intent import Intent
 from assistant_ia.intelligence.response import ModelResponse
 from assistant_ia.learning.models import ExperienceProvenance
+from assistant_ia.learning.outcomes import ExperienceOutcome, UserFeedback
 from assistant_ia.learning.repository import BehavioralLearningRepository
 from assistant_ia.learning.service import (
+    BehavioralOutcomeNotRecordableError,
     BehavioralLearningScopeError,
     BehavioralLearningService,
 )
@@ -219,6 +221,52 @@ class BehavioralLearningServiceTests(unittest.TestCase):
             AssistantCore(
                 model_client=FakeModelClient(),
                 behavioral_learning_service="repository",
+            )
+
+    def test_action_result_and_feedback_create_explicit_experiences(self) -> None:
+        attempt = self.service.begin_active_person_attempt(
+            context="Explication", objective="Comprendre", strategy="Équations d'abord"
+        )
+        from assistant_ia.actions.result import ActionExecutionResult
+
+        action_experience = self.service.record_active_person_action_result(
+            attempt,
+            ActionExecutionResult("launch_application", "success", "Lancé.", True),
+        )
+        self.assertEqual(action_experience.outcome_kind, "verified_action")
+
+        feedback_attempt = self.service.begin_active_person_attempt(
+            context="Explication", objective="Comprendre", strategy="Équations d'abord"
+        )
+        feedback_experience = self.service.record_active_person_feedback(
+            feedback_attempt,
+            UserFeedback("correction", "Commence par l'intuition."),
+            status="failure",
+            summary="La personne demande une autre approche.",
+        )
+        self.assertEqual(feedback_experience.person_id, self.este.id)
+        self.assertEqual(feedback_experience.feedback_kind, "correction")
+        self.assertEqual(feedback_experience.provenance.source_type, "conversation_turn")
+        self.assertEqual(self.service.list_active_person_lesson_candidates(), ())
+
+    def test_unexecuted_action_is_not_persisted_and_attempt_scope_is_fixed(self) -> None:
+        attempt = self.service.begin_active_person_attempt(
+            context="Commande", objective="Lancer", strategy="Registre"
+        )
+        from assistant_ia.actions.result import ActionExecutionResult
+
+        with self.assertRaises(BehavioralOutcomeNotRecordableError):
+            self.service.record_active_person_action_result(
+                attempt,
+                ActionExecutionResult("launch_application", "cancelled", "Annulé.", False),
+            )
+        self.assertEqual(self.service.list_active_person_experiences(), ())
+        self.person_context.set_active_persistent_person(self.alice)
+        with self.assertRaises(BehavioralLearningScopeError):
+            self.service.record_active_person_outcome(
+                attempt,
+                ExperienceOutcome("success", "reported_result", "Réussi."),
+                provenance=self.provenance,
             )
 
 

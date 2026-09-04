@@ -8,6 +8,7 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from assistant_ia.learning.models import ExperienceProvenance
+from assistant_ia.learning.outcomes import ExperienceOutcome, OutcomeMeasurement, UserFeedback
 from assistant_ia.learning.repository import (
     BehavioralExperienceInUseError,
     BehavioralExperienceNotFoundError,
@@ -91,6 +92,35 @@ class BehavioralLearningRepositoryTests(unittest.TestCase):
             repository.list_global_experiences(), (global_experience,)
         )
 
+    def test_structured_outcome_feedback_and_measurements_round_trip(self) -> None:
+        repository = BehavioralLearningRepository(self.database)
+        outcome = ExperienceOutcome(
+            status="failure",
+            kind="user_feedback",
+            summary="La personne demande une correction.",
+            result_code="clarification_requested",
+            feedback=UserFeedback("correction", "Commence par l'intuition."),
+            measurements=(OutcomeMeasurement("durée", 2.5, "s"),),
+        )
+        experience = repository.create_experience(
+            person_id=self.este.id,
+            context="Explication",
+            objective="Comprendre",
+            strategy="Équations d'abord",
+            result=outcome.summary,
+            provenance=ExperienceProvenance(
+                source_type="conversation_turn",
+                source_text="Commence par l'intuition.",
+            ),
+            outcome=outcome,
+        )
+        loaded = repository.get_experience(experience.id)
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertEqual(loaded.outcome_status, "failure")
+        self.assertEqual(loaded.feedback_kind, "correction")
+        self.assertEqual(loaded.feedback_text, "Commence par l'intuition.")
+        self.assertEqual(loaded.measurements[0].unit, "s")
     def test_update_preserves_scope_provenance_and_creation_time(self) -> None:
         repository = BehavioralLearningRepository(
             self.database,

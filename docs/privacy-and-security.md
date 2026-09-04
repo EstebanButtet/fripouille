@@ -69,8 +69,9 @@ prompt section, and memory retains its own independent limits.
 ## Behavioral learning policy
 
 Behavioral learning is separate from memories, profile facts and social
-observations. FRP-IA-05 stores only explicit experiences and sourced lesson
-candidates. It defines no confirmed behavioral rule, automatic promotion,
+observations. FRP-IA-06 stores only explicit application outcomes or explicit
+user feedback as experiences, with structured provenance and person scope.
+It defines no confirmed behavioral rule, automatic promotion,
 confidence threshold, role, mood or identity mutation.
 
 The default conversation and action pipelines write no learning record. An

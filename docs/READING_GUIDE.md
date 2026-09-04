@@ -212,9 +212,10 @@ souvenirs injectés.
 
 Ordre conseillé :
 
-1. `src/assistant_ia/learning/models.py`
-2. `src/assistant_ia/learning/repository.py`
-3. `src/assistant_ia/learning/service.py`
+1. `src/assistant_ia/learning/outcomes.py`
+2. `src/assistant_ia/learning/models.py`
+3. `src/assistant_ia/learning/repository.py`
+4. `src/assistant_ia/learning/service.py`
 
 Une `BehavioralExperience` n'est ni un souvenir ni une observation sociale :
 elle décrit une stratégie tentée dans un contexte et son résultat. Sa
@@ -359,7 +360,7 @@ fonctionnalités existantes :
 
 - FRP-IA-04 profils et relations : terminé ;
 - FRP-IA-05 fondations de l'apprentissage comportemental : terminé ;
-- FRP-IA-06 retour d'expérience : futur ;
+- FRP-IA-06 retour d'expérience : terminé ;
 - FRP-IA-07 consolidation : futur ;
 - FRP-IA-08 état interne : futur ;
 - FRP-IA-09 voix : futur ;

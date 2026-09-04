@@ -170,7 +170,13 @@ the candidate must first be removed so provenance is never silently broken.
 Person-scoped list operations use an exact application-resolved identifier and
 never mix another person's rows or global rows.
 
-FRP-IA-06 remains responsible for richer feedback and outcome evaluation.
+FRP-IA-06 ajoute un résultat applicatif structuré et un chemin explicite
+tentative → issue → `BehavioralExperience`. Les feedbacks utilisateur sont
+typés (approbation, désapprobation, correction ou réessai) et les mesures sont
+factuelles, sans score universel. Une issue technique reste distincte d'une
+évaluation comportementale ; une tentative non exécutée n'est pas persistée.
+Le résultat connu de l'application prime toujours sur une interprétation LLM.
+La consolidation et la promotion vers une règle restent réservées à FRP-IA-07.
 FRP-IA-07 remains responsible for comparison, contradiction handling,
 consolidation, validation/rejection and any future stable behavioral rule.
 Identity, roles and internal state have no dependency on the learning models.

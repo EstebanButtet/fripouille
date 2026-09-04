@@ -6,6 +6,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Literal, cast
 
+from assistant_ia.learning.outcomes import (
+    ExperienceOutcome,
+    OutcomeKind,
+    OutcomeMeasurement,
+    OutcomeStatus,
+    UserFeedback,
+    UserFeedbackKind,
+)
+
 ExperienceSourceType = Literal[
     "manual_entry",
     "conversation_turn",
@@ -82,6 +91,12 @@ class BehavioralExperience:
     invalidation_reason: str | None
     created_at: datetime
     updated_at: datetime
+    outcome_status: OutcomeStatus = "unknown"
+    outcome_kind: OutcomeKind = "reported_result"
+    result_code: str | None = None
+    feedback_kind: UserFeedbackKind | None = None
+    feedback_text: str | None = None
+    measurements: tuple[OutcomeMeasurement, ...] = ()
 
     def __post_init__(self) -> None:
         created_at = _normalize_datetime(self.created_at, "Experience creation time")
@@ -95,6 +110,24 @@ class BehavioralExperience:
         )
         if not isinstance(self.provenance, ExperienceProvenance):
             raise TypeError("Experience provenance must be ExperienceProvenance.")
+        feedback = None
+        if self.feedback_kind is not None or self.feedback_text is not None:
+            if self.feedback_kind is None or self.feedback_text is None:
+                raise ValueError(
+                    "Experience feedback kind and text must be present together."
+                )
+            feedback = UserFeedback(
+                kind=self.feedback_kind,
+                content=self.feedback_text,
+            )
+        outcome = ExperienceOutcome(
+            status=self.outcome_status,
+            kind=self.outcome_kind,
+            summary=self.result,
+            result_code=self.result_code,
+            feedback=feedback,
+            measurements=self.measurements,
+        )
 
         object.__setattr__(self, "id", _validate_identifier(self.id, "Experience"))
         object.__setattr__(
@@ -122,6 +155,20 @@ class BehavioralExperience:
         object.__setattr__(self, "invalidation_reason", reason)
         object.__setattr__(self, "created_at", created_at)
         object.__setattr__(self, "updated_at", updated_at)
+        object.__setattr__(self, "outcome_status", outcome.status)
+        object.__setattr__(self, "outcome_kind", outcome.kind)
+        object.__setattr__(self, "result_code", outcome.result_code)
+        object.__setattr__(
+            self,
+            "feedback_kind",
+            None if outcome.feedback is None else outcome.feedback.kind,
+        )
+        object.__setattr__(
+            self,
+            "feedback_text",
+            None if outcome.feedback is None else outcome.feedback.content,
+        )
+        object.__setattr__(self, "measurements", outcome.measurements)
 
 
 @dataclass(frozen=True, slots=True)

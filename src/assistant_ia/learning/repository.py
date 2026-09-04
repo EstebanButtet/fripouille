@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime, timezone
+import json
+from json import JSONDecodeError
 from typing import cast
 
 from assistant_ia.learning.models import (
@@ -12,6 +14,14 @@ from assistant_ia.learning.models import (
     ExperienceProvenance,
     ExperienceSourceType,
     LearningRecordStatus,
+)
+from assistant_ia.learning.outcomes import (
+    ExperienceOutcome,
+    OutcomeKind,
+    OutcomeMeasurement,
+    OutcomeStatus,
+    UserFeedback,
+    UserFeedbackKind,
 )
 from assistant_ia.memory.errors import RepositoryError
 from assistant_ia.memory.repository import SQLiteDatabase
@@ -22,7 +32,9 @@ MAX_LEARNING_RESULT_LIMIT = 500
 _EXPERIENCE_SELECT = """
     SELECT id, person_id, context, objective, strategy, result, evaluation,
            source_type, source_reference, source_text, status,
-           invalidation_reason, created_at, updated_at
+           invalidation_reason, created_at, updated_at, outcome_status,
+           outcome_kind, result_code, feedback_kind, feedback_text,
+           measurements_json
     FROM behavioral_experiences
 """
 _CANDIDATE_SELECT = """
@@ -69,7 +81,21 @@ class BehavioralLearningRepository:
         provenance: ExperienceProvenance,
         evaluation: str | None = None,
         person_id: int | None = None,
+        outcome: ExperienceOutcome | None = None,
     ) -> BehavioralExperience:
+        if outcome is None:
+            outcome = ExperienceOutcome(
+                status="unknown",
+                kind="reported_result",
+                summary=result,
+            )
+        elif not isinstance(outcome, ExperienceOutcome):
+            raise TypeError("Experience outcome must be ExperienceOutcome or None.")
+        if not isinstance(result, str):
+            raise TypeError("Experience result must be a string.")
+        result = result.strip()
+        if result != outcome.summary:
+            raise ValueError("Experience result must match its structured outcome.")
         now = _normalized_now(self._clock())
         validated = BehavioralExperience(
             id=1,
@@ -84,6 +110,16 @@ class BehavioralLearningRepository:
             invalidation_reason=None,
             created_at=now,
             updated_at=now,
+            outcome_status=outcome.status,
+            outcome_kind=outcome.kind,
+            result_code=outcome.result_code,
+            feedback_kind=(
+                None if outcome.feedback is None else outcome.feedback.kind
+            ),
+            feedback_text=(
+                None if outcome.feedback is None else outcome.feedback.content
+            ),
+            measurements=outcome.measurements,
         )
         with self._database.connect() as connection:
             cursor = connection.execute(
@@ -92,7 +128,9 @@ class BehavioralLearningRepository:
                     person_id, context, objective, strategy, result, evaluation,
                     source_type, source_reference, source_text, status,
                     invalidation_reason, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    , outcome_status, outcome_kind, result_code,
+                    feedback_kind, feedback_text, measurements_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     validated.person_id,
@@ -108,6 +146,12 @@ class BehavioralLearningRepository:
                     validated.invalidation_reason,
                     now.isoformat(),
                     now.isoformat(),
+                    validated.outcome_status,
+                    validated.outcome_kind,
+                    validated.result_code,
+                    validated.feedback_kind,
+                    validated.feedback_text,
+                    _serialize_measurements(validated.measurements),
                 ),
             )
             experience_id = _created_identifier(cursor.lastrowid, "experience")
@@ -184,8 +228,32 @@ class BehavioralLearningRepository:
         strategy: str,
         result: str,
         evaluation: str | None = None,
+        outcome: ExperienceOutcome | None = None,
     ) -> BehavioralExperience:
         existing = self._require_experience(experience_id)
+        if outcome is None:
+            feedback = None
+            if existing.feedback_kind is not None:
+                assert existing.feedback_text is not None
+                feedback = UserFeedback(
+                    kind=existing.feedback_kind,
+                    content=existing.feedback_text,
+                )
+            outcome = ExperienceOutcome(
+                status=existing.outcome_status,
+                kind=existing.outcome_kind,
+                summary=result,
+                result_code=existing.result_code,
+                feedback=feedback,
+                measurements=existing.measurements,
+            )
+        elif not isinstance(outcome, ExperienceOutcome):
+            raise TypeError("Experience outcome must be ExperienceOutcome or None.")
+        if not isinstance(result, str):
+            raise TypeError("Experience result must be a string.")
+        result = result.strip()
+        if result != outcome.summary:
+            raise ValueError("Experience result must match its structured outcome.")
         now = _normalized_now(self._clock())
         validated = BehavioralExperience(
             id=existing.id,
@@ -200,13 +268,25 @@ class BehavioralLearningRepository:
             invalidation_reason=existing.invalidation_reason,
             created_at=existing.created_at,
             updated_at=now,
+            outcome_status=outcome.status,
+            outcome_kind=outcome.kind,
+            result_code=outcome.result_code,
+            feedback_kind=(
+                None if outcome.feedback is None else outcome.feedback.kind
+            ),
+            feedback_text=(
+                None if outcome.feedback is None else outcome.feedback.content
+            ),
+            measurements=outcome.measurements,
         )
         with self._database.connect() as connection:
             cursor = connection.execute(
                 """
                 UPDATE behavioral_experiences
                 SET context = ?, objective = ?, strategy = ?, result = ?,
-                    evaluation = ?, updated_at = ?
+                    evaluation = ?, updated_at = ?, outcome_status = ?,
+                    outcome_kind = ?, result_code = ?, feedback_kind = ?,
+                    feedback_text = ?, measurements_json = ?
                 WHERE id = ?
                 """,
                 (
@@ -216,6 +296,12 @@ class BehavioralLearningRepository:
                     validated.result,
                     validated.evaluation,
                     now.isoformat(),
+                    validated.outcome_status,
+                    validated.outcome_kind,
+                    validated.result_code,
+                    validated.feedback_kind,
+                    validated.feedback_text,
+                    _serialize_measurements(validated.measurements),
                     existing.id,
                 ),
             )
@@ -517,7 +603,7 @@ class BehavioralLearningRepository:
 
 
 def _experience_from_row(row: tuple[object, ...] | None) -> BehavioralExperience:
-    if row is None or len(row) != 14:
+    if row is None or len(row) != 20:
         raise RepositoryError("Stored behavioral experience data is incomplete.")
     try:
         return BehavioralExperience(
@@ -537,6 +623,12 @@ def _experience_from_row(row: tuple[object, ...] | None) -> BehavioralExperience
             invalidation_reason=cast(str | None, row[11]),
             created_at=_parse_datetime(row[12]),
             updated_at=_parse_datetime(row[13]),
+            outcome_status=cast(OutcomeStatus, row[14]),
+            outcome_kind=cast(OutcomeKind, row[15]),
+            result_code=cast(str | None, row[16]),
+            feedback_kind=cast(UserFeedbackKind | None, row[17]),
+            feedback_text=cast(str | None, row[18]),
+            measurements=_parse_measurements(row[19]),
         )
     except (TypeError, ValueError) as error:
         raise RepositoryError("Stored behavioral experience data is invalid.") from error
@@ -638,6 +730,43 @@ def _parse_datetime(value: object) -> datetime:
     if not isinstance(value, str):
         raise TypeError("Stored learning timestamp must be text.")
     return datetime.fromisoformat(value)
+
+
+def _serialize_measurements(
+    measurements: tuple[OutcomeMeasurement, ...],
+) -> str:
+    return json.dumps(
+        [
+            {"name": item.name, "value": item.value, "unit": item.unit}
+            for item in measurements
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _parse_measurements(value: object) -> tuple[OutcomeMeasurement, ...]:
+    if not isinstance(value, str):
+        raise TypeError("Stored outcome measurements must be text.")
+    try:
+        items = json.loads(value)
+    except JSONDecodeError as error:
+        raise ValueError("Stored outcome measurements are not valid JSON.") from error
+    if not isinstance(items, list):
+        raise TypeError("Stored outcome measurements must be a JSON list.")
+    measurements: list[OutcomeMeasurement] = []
+    for item in items:
+        if not isinstance(item, dict) or set(item) != {"name", "value", "unit"}:
+            raise ValueError("Stored outcome measurement data is invalid.")
+        measurements.append(
+            OutcomeMeasurement(
+                name=item["name"],
+                value=item["value"],
+                unit=item["unit"],
+            )
+        )
+    return tuple(measurements)
 
 
 def _utc_now() -> datetime:

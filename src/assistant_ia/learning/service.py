@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime, timezone
+
+from assistant_ia.actions.result import ActionExecutionResult
+
 from assistant_ia.learning.models import (
     BehavioralExperience,
     BehavioralLessonCandidate,
     ExperienceProvenance,
+)
+from assistant_ia.learning.outcomes import (
+    BehavioralAttempt,
+    ExperienceOutcome,
+    OutcomeStatus,
+    UserFeedback,
+    outcome_from_action_result,
 )
 from assistant_ia.learning.repository import BehavioralLearningRepository
 from assistant_ia.people.context import ActivePersonContext
@@ -13,6 +25,10 @@ from assistant_ia.people.context import ActivePersonContext
 
 class BehavioralLearningScopeError(RuntimeError):
     """Signaler qu'une opération n'appartient pas à la portée active."""
+
+
+class BehavioralOutcomeNotRecordableError(ValueError):
+    """Une issue non exécutée ne constitue pas une expérience."""
 
 
 class BehavioralLearningService:
@@ -27,6 +43,7 @@ class BehavioralLearningService:
         self,
         repository: BehavioralLearningRepository,
         person_context: ActivePersonContext,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not isinstance(repository, BehavioralLearningRepository):
             raise TypeError(
@@ -38,6 +55,63 @@ class BehavioralLearningService:
             )
         self._repository = repository
         self._person_context = person_context
+        if clock is not None and not callable(clock):
+            raise TypeError("Behavioral learning service clock must be callable.")
+        self._clock = clock if clock is not None else lambda: datetime.now(timezone.utc)
+
+    def begin_active_person_attempt(self, *, context: str, objective: str, strategy: str) -> BehavioralAttempt:
+        return BehavioralAttempt(
+            person_id=self._require_active_person_id(), context=context,
+            objective=objective, strategy=strategy,
+            started_at=_normalized_now(self._clock()),
+        )
+
+    def begin_global_attempt(self, *, context: str, objective: str, strategy: str) -> BehavioralAttempt:
+        return BehavioralAttempt(
+            person_id=None, context=context, objective=objective,
+            strategy=strategy, started_at=_normalized_now(self._clock()),
+        )
+
+    def record_active_person_outcome(self, attempt: BehavioralAttempt, outcome: ExperienceOutcome, *, provenance: ExperienceProvenance, evaluation: str | None = None) -> BehavioralExperience:
+        person_id = self._require_active_person_id()
+        self._validate_attempt(attempt, person_id)
+        self._validate_outcome(outcome)
+        return self._repository.create_experience(
+            person_id=person_id, context=attempt.context, objective=attempt.objective,
+            strategy=attempt.strategy, result=outcome.summary, evaluation=evaluation,
+            provenance=provenance, outcome=outcome,
+        )
+
+    def record_global_outcome(self, attempt: BehavioralAttempt, outcome: ExperienceOutcome, *, provenance: ExperienceProvenance, evaluation: str | None = None) -> BehavioralExperience:
+        self._validate_attempt(attempt, None)
+        self._validate_outcome(outcome)
+        return self._repository.create_experience(
+            person_id=None, context=attempt.context, objective=attempt.objective,
+            strategy=attempt.strategy, result=outcome.summary, evaluation=evaluation,
+            provenance=provenance, outcome=outcome,
+        )
+
+    def record_active_person_action_result(self, attempt: BehavioralAttempt, action_result: ActionExecutionResult, *, source_text: str | None = None, evaluation: str | None = None) -> BehavioralExperience:
+        if not isinstance(action_result, ActionExecutionResult):
+            raise TypeError("Action result must be ActionExecutionResult.")
+        return self.record_active_person_outcome(
+            attempt, outcome_from_action_result(action_result),
+            provenance=ExperienceProvenance(
+                source_type="action_execution",
+                source_reference=action_result.action_name,
+                source_text=source_text,
+            ), evaluation=evaluation,
+        )
+
+    def record_active_person_feedback(self, attempt: BehavioralAttempt, feedback: UserFeedback, *, status: OutcomeStatus, summary: str, evaluation: str | None = None) -> BehavioralExperience:
+        if not isinstance(feedback, UserFeedback):
+            raise TypeError("Feedback must be UserFeedback.")
+        return self.record_active_person_outcome(
+            attempt,
+            ExperienceOutcome(status=status, kind="user_feedback", summary=summary, feedback=feedback),
+            provenance=ExperienceProvenance(source_type="conversation_turn", source_text=feedback.content),
+            evaluation=evaluation,
+        )
 
     def record_active_person_experience(
         self,
@@ -159,6 +233,24 @@ class BehavioralLearningService:
             )
         return person_id
 
+    @staticmethod
+    def _validate_attempt(attempt: BehavioralAttempt, expected_person_id: int | None) -> None:
+        if not isinstance(attempt, BehavioralAttempt):
+            raise TypeError("Learning attempt must be BehavioralAttempt.")
+        if attempt.person_id != expected_person_id:
+            raise BehavioralLearningScopeError(
+                "Learning attempt does not belong to the requested person scope."
+            )
+
+    @staticmethod
+    def _validate_outcome(outcome: ExperienceOutcome) -> None:
+        if not isinstance(outcome, ExperienceOutcome):
+            raise TypeError("Learning outcome must be ExperienceOutcome.")
+        if outcome.status == "not_executed":
+            raise BehavioralOutcomeNotRecordableError(
+                "An unexecuted attempt is not a behavioral experience."
+            )
+
     def _validated_source_ids(
         self,
         experiences: tuple[BehavioralExperience, ...],
@@ -192,3 +284,11 @@ def _validate_experiences(
             "Lesson sources must be BehavioralExperience instances."
         )
     return value
+
+
+def _normalized_now(value: datetime) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError("Learning service clock must return a datetime.")
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("Learning service clock must return a timezone-aware datetime.")
+    return value.astimezone(timezone.utc)

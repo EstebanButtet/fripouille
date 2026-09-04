@@ -20,13 +20,14 @@ renaming history.
 | FRP-IA-03 | Contextual memory series: provenance and schema v3, retrieval, bounded history, prompt injection, automatic candidates, controlled promotion and correction | Completed |
 | FRP-IA-04 | Persistent people, controlled profile facts, person-scoped memories, bounded relationships, observations and private social context | Completed |
 | FRP-IA-05 | Inspectable behavioral experiences, sourced lesson candidates and application-owned person scope; no automatic consolidation | Completed |
+| FRP-IA-06 | Structured action outcomes, explicit user feedback and controlled experience recording | Completed |
 
 The hardware display commits in the same history establish a prototype track,
 not proof that a complete robot has been delivered.
 
 ## Current position
 
-The current branch includes FRP-IA-05A and 05B. Behavioral experiences retain
+The current branch includes FRP-IA-05A/05B and FRP-IA-06A/06B. Behavioral experiences retain
 context, objective, strategy, result, minimal evaluation and structured
 provenance. Lesson candidates remain explicitly non-confirmed and retain their
 exact source-experience links. Neither is created automatically from a turn,
@@ -36,7 +37,6 @@ used as a permission, or injected into model prompts.
 
 | Milestone | Direction | Status |
 | --- | --- | --- |
-| FRP-IA-06 | Experience feedback and explicit evaluation of outcomes | Future |
 | FRP-IA-07 | Consolidation of observations and learned material | Future |
 | FRP-IA-08 | Internal state modeled separately from identity and conversation | Future |
 | FRP-IA-09 | Voice input and output interfaces | Future |
