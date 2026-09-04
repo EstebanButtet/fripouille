@@ -29,7 +29,7 @@ DEFAULT_DATABASE_DIRECTORY_NAME = "assistant-ia"
 DEFAULT_DATABASE_FILENAME = "assistant_ia.db"
 
 _INITIAL_SCHEMA_VERSION = 1
-CURRENT_SCHEMA_VERSION = 9
+CURRENT_SCHEMA_VERSION = 10
 
 _SCHEMA_VERSION_COLUMNS = (
     ("id", "INTEGER", 0, 1),
@@ -134,6 +134,23 @@ _BUSINESS_TABLE_COLUMNS = {
     ),
     "behavioral_lesson_sources": (
         ("candidate_id", "INTEGER", 1, 1),
+        ("experience_id", "INTEGER", 1, 2),
+    ),
+    "behavioral_rules": (
+        ("id", "INTEGER", 0, 1),
+        ("person_id", "INTEGER", 0, 0),
+        ("context_pattern", "TEXT", 1, 0),
+        ("proposed_strategy", "TEXT", 1, 0),
+        ("rationale", "TEXT", 1, 0),
+        ("confirmation", "TEXT", 1, 0),
+        ("status", "TEXT", 1, 0),
+        ("invalidation_reason", "TEXT", 0, 0),
+        ("confirmed_at", "TEXT", 1, 0),
+        ("created_at", "TEXT", 1, 0),
+        ("updated_at", "TEXT", 1, 0),
+    ),
+    "behavioral_rule_sources": (
+        ("rule_id", "INTEGER", 1, 1),
         ("experience_id", "INTEGER", 1, 2),
     ),
 }
@@ -703,6 +720,7 @@ def _migrate_schema_8_to_9(
             ))
         """
     )
+
     connection.execute(
         """
         ALTER TABLE behavioral_experiences
@@ -749,6 +767,39 @@ def _migrate_schema_8_to_9(
             CHECK (length(trim(measurements_json)) > 0)
         """
     )
+
+
+def _migrate_schema_9_to_10(connection: sqlite3.Connection) -> None:
+    """Ajouter les règles confirmées et leurs preuves sans promotion historique."""
+    connection.execute(
+        """
+        CREATE TABLE behavioral_rules (
+            id INTEGER PRIMARY KEY,
+            person_id INTEGER REFERENCES persons(id) ON DELETE CASCADE,
+            context_pattern TEXT NOT NULL CHECK (length(trim(context_pattern)) > 0),
+            proposed_strategy TEXT NOT NULL CHECK (length(trim(proposed_strategy)) > 0),
+            rationale TEXT NOT NULL CHECK (length(trim(rationale)) > 0),
+            confirmation TEXT NOT NULL CHECK (confirmation = 'explicit_application_confirmation'),
+            status TEXT NOT NULL CHECK (status IN ('active', 'invalidated')),
+            invalidation_reason TEXT CHECK (invalidation_reason IS NULL OR length(trim(invalidation_reason)) > 0),
+            confirmed_at TEXT NOT NULL CHECK (length(trim(confirmed_at)) > 0),
+            created_at TEXT NOT NULL CHECK (length(trim(created_at)) > 0),
+            updated_at TEXT NOT NULL CHECK (length(trim(updated_at)) > 0),
+            CHECK ((status = 'active' AND invalidation_reason IS NULL) OR (status = 'invalidated' AND invalidation_reason IS NOT NULL))
+        )
+        """
+    )
+    connection.execute("CREATE INDEX idx_behavioral_rules_person_created ON behavioral_rules (person_id, created_at DESC, id DESC)")
+    connection.execute(
+        """
+        CREATE TABLE behavioral_rule_sources (
+            rule_id INTEGER NOT NULL REFERENCES behavioral_rules(id) ON DELETE CASCADE,
+            experience_id INTEGER NOT NULL REFERENCES behavioral_experiences(id),
+            PRIMARY KEY (rule_id, experience_id)
+        )
+        """
+    )
+    connection.execute("CREATE INDEX idx_behavioral_rule_sources_experience ON behavioral_rule_sources (experience_id, rule_id)")
 
 
 def _create_behavioral_lesson_tables(
@@ -914,6 +965,7 @@ _SCHEMA_MIGRATIONS = {
     6: _migrate_schema_6_to_7,
     7: _migrate_schema_7_to_8,
     8: _migrate_schema_8_to_9,
+    9: _migrate_schema_9_to_10,
 }
 
 

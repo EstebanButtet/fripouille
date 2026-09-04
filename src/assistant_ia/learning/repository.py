@@ -9,6 +9,7 @@ from json import JSONDecodeError
 from typing import cast
 
 from assistant_ia.learning.models import (
+    ConfirmedBehavioralRule,
     BehavioralExperience,
     BehavioralLessonCandidate,
     ExperienceProvenance,
@@ -41,6 +42,12 @@ _CANDIDATE_SELECT = """
     SELECT id, person_id, context_pattern, proposed_strategy, rationale,
            status, invalidation_reason, created_at, updated_at
     FROM behavioral_lesson_candidates
+"""
+_RULE_SELECT = """
+    SELECT id, person_id, context_pattern, proposed_strategy, rationale,
+           confirmation, status, invalidation_reason, confirmed_at,
+           created_at, updated_at
+    FROM behavioral_rules
 """
 
 
@@ -582,6 +589,87 @@ class BehavioralLearningRepository:
             _require_changed(cursor.rowcount, "Lesson candidate deletion")
         return existing
 
+    def create_confirmed_rule(
+        self, *, person_id: int | None, context_pattern: str,
+        proposed_strategy: str, rationale: str,
+        source_experience_ids: tuple[int, ...],
+    ) -> ConfirmedBehavioralRule:
+        source_ids = _validate_source_ids(source_experience_ids)
+        now = _normalized_now(self._clock())
+        validated = ConfirmedBehavioralRule(
+            id=1, person_id=person_id, context_pattern=context_pattern,
+            proposed_strategy=proposed_strategy, rationale=rationale,
+            source_experience_ids=source_ids,
+            confirmation="explicit_application_confirmation", status="active",
+            invalidation_reason=None, confirmed_at=now, created_at=now, updated_at=now,
+        )
+        with self._database.connect() as connection:
+            rows = connection.execute(
+                f"SELECT id, person_id FROM behavioral_experiences WHERE id IN ({','.join('?' for _ in source_ids)})",
+                source_ids,
+            ).fetchall()
+            if {row[0] for row in rows} != set(source_ids):
+                raise BehavioralExperienceNotFoundError("A rule source experience does not exist.")
+            if any(row[1] != person_id for row in rows):
+                raise ValueError("Rule sources must share the rule person scope.")
+            cursor = connection.execute(
+                """INSERT INTO behavioral_rules
+                (person_id, context_pattern, proposed_strategy, rationale, confirmation,
+                 status, invalidation_reason, confirmed_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (validated.person_id, validated.context_pattern, validated.proposed_strategy,
+                 validated.rationale, validated.confirmation, validated.status,
+                 validated.invalidation_reason, now.isoformat(), now.isoformat(), now.isoformat()),
+            )
+            rule_id = _created_identifier(cursor.lastrowid, "rule")
+            connection.executemany(
+                "INSERT INTO behavioral_rule_sources (rule_id, experience_id) VALUES (?, ?)",
+                ((rule_id, source_id) for source_id in source_ids),
+            )
+            row = connection.execute(f"{_RULE_SELECT} WHERE id = ?", (rule_id,)).fetchone()
+        return _rule_from_row(row, source_ids)
+
+    def get_confirmed_rule(self, rule_id: int) -> ConfirmedBehavioralRule | None:
+        normalized = _validate_identifier(rule_id, "Rule")
+        with self._database.connect() as connection:
+            row = connection.execute(f"{_RULE_SELECT} WHERE id = ?", (normalized,)).fetchone()
+            if row is None:
+                return None
+            sources = tuple(row[0] for row in connection.execute(
+                "SELECT experience_id FROM behavioral_rule_sources WHERE rule_id = ? ORDER BY experience_id", (normalized,)
+            ).fetchall())
+        return _rule_from_row(row, sources)
+
+    def list_rules(self, *, person_id: int | None, include_invalidated: bool = False) -> tuple[ConfirmedBehavioralRule, ...]:
+        clause = "person_id IS NULL" if person_id is None else "person_id = ?"
+        params: tuple[object, ...] = () if person_id is None else (person_id,)
+        status = "" if include_invalidated else " AND status = 'active'"
+        with self._database.connect() as connection:
+            rows = connection.execute(f"{_RULE_SELECT} WHERE {clause}{status} ORDER BY created_at DESC, id DESC", params).fetchall()
+            return tuple(_rule_from_row(row, tuple(item[0] for item in connection.execute("SELECT experience_id FROM behavioral_rule_sources WHERE rule_id = ? ORDER BY experience_id", (row[0],)).fetchall())) for row in rows)
+
+    def invalidate_confirmed_rule(self, rule_id: int, reason: str) -> ConfirmedBehavioralRule:
+        existing = self.get_confirmed_rule(rule_id)
+        if existing is None:
+            raise RepositoryError(f"Behavioral rule {rule_id} does not exist.")
+        if existing.status == "invalidated":
+            raise ValueError("Rule is already invalidated.")
+        now = _normalized_now(self._clock())
+        reason = _normalize_text(reason, "Rule invalidation reason")
+        with self._database.connect() as connection:
+            cursor = connection.execute("UPDATE behavioral_rules SET status='invalidated', invalidation_reason=?, updated_at=? WHERE id=? AND status='active'", (reason, now.isoformat(), existing.id))
+            _require_changed(cursor.rowcount, "Rule invalidation")
+        return self.get_confirmed_rule(existing.id)  # type: ignore[return-value]
+
+    def delete_confirmed_rule(self, rule_id: int) -> ConfirmedBehavioralRule:
+        existing = self.get_confirmed_rule(rule_id)
+        if existing is None:
+            raise RepositoryError(f"Behavioral rule {rule_id} does not exist.")
+        with self._database.connect() as connection:
+            cursor = connection.execute("DELETE FROM behavioral_rules WHERE id = ?", (existing.id,))
+            _require_changed(cursor.rowcount, "Rule deletion")
+        return existing
+
     def _require_experience(self, experience_id: int) -> BehavioralExperience:
         experience = self.get_experience(experience_id)
         if experience is None:
@@ -657,6 +745,26 @@ def _candidate_from_row(
         raise RepositoryError(
             "Stored behavioral lesson candidate data is invalid."
         ) from error
+
+
+def _rule_from_row(
+    row: tuple[object, ...] | None,
+    source_ids: tuple[int, ...],
+) -> ConfirmedBehavioralRule:
+    if row is None or len(row) != 11:
+        raise RepositoryError("Stored behavioral rule data is incomplete.")
+    try:
+        return ConfirmedBehavioralRule(
+            id=cast(int, row[0]), person_id=cast(int | None, row[1]),
+            context_pattern=cast(str, row[2]), proposed_strategy=cast(str, row[3]),
+            rationale=cast(str, row[4]), source_experience_ids=source_ids,
+            confirmation=cast(str, row[5]), status=cast(str, row[6]),
+            invalidation_reason=cast(str | None, row[7]),
+            confirmed_at=_parse_datetime(row[8]), created_at=_parse_datetime(row[9]),
+            updated_at=_parse_datetime(row[10]),
+        )
+    except (TypeError, ValueError) as error:
+        raise RepositoryError("Stored behavioral rule data is invalid.") from error
 
 
 def _source_ids(connection: object, candidate_id: int) -> tuple[int, ...]:

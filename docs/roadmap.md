@@ -21,23 +21,24 @@ renaming history.
 | FRP-IA-04 | Persistent people, controlled profile facts, person-scoped memories, bounded relationships, observations and private social context | Completed |
 | FRP-IA-05 | Inspectable behavioral experiences, sourced lesson candidates and application-owned person scope; no automatic consolidation | Completed |
 | FRP-IA-06 | Structured action outcomes, explicit user feedback and controlled experience recording | Completed |
+| FRP-IA-07 | Deterministic evidence consolidation and explicitly confirmed reversible behavioral rules | Completed |
 
 The hardware display commits in the same history establish a prototype track,
 not proof that a complete robot has been delivered.
 
 ## Current position
 
-The current branch includes FRP-IA-05A/05B and FRP-IA-06A/06B. Behavioral experiences retain
+The current branch includes FRP-IA-05A/05B, FRP-IA-06A/06B and FRP-IA-07A/07B. Behavioral experiences retain
 context, objective, strategy, result, minimal evaluation and structured
 provenance. Lesson candidates remain explicitly non-confirmed and retain their
-exact source-experience links. Neither is created automatically from a turn,
+exact source-experience links. Consolidation is deterministic and rules require
+explicit application confirmation; neither is created automatically from a turn,
 used as a permission, or injected into model prompts.
 
 ## Planned milestones
 
 | Milestone | Direction | Status |
 | --- | --- | --- |
-| FRP-IA-07 | Consolidation of observations and learned material | Future |
 | FRP-IA-08 | Internal state modeled separately from identity and conversation | Future |
 | FRP-IA-09 | Voice input and output interfaces | Future |
 | FRP-IA-10 | Face and expressive behavior beyond the current provisional visuals | Future |

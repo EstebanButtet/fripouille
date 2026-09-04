@@ -71,8 +71,10 @@ prompt section, and memory retains its own independent limits.
 Behavioral learning is separate from memories, profile facts and social
 observations. FRP-IA-06 stores only explicit application outcomes or explicit
 user feedback as experiences, with structured provenance and person scope.
-It defines no confirmed behavioral rule, automatic promotion,
-confidence threshold, role, mood or identity mutation.
+It defines no automatic promotion, confidence threshold, role, mood or
+identity mutation. FRP-IA-07 excludes invalidated evidence, retains exact
+source links, and requires explicit application confirmation; rules grant no
+permissions and cannot alter identity.
 
 The default conversation and action pipelines write no learning record. An
 application caller must invoke `BehavioralLearningService` explicitly. For a

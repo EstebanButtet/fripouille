@@ -76,10 +76,12 @@ l'apprentissage et de l'état interne.
 | `src/assistant_ia/learning/outcomes.py` | Tentatives, résultats vérifiés, feedback explicite et mesures factuelles. |
 | `src/assistant_ia/learning/repository.py` | Persistance, traçabilité, correction, invalidation et suppression contrôlée. |
 | `src/assistant_ia/learning/service.py` | Tentatives et retours explicitement enregistrés dans la portée globale ou active résolue. |
+| `tests/test_learning_consolidation.py` | Consolidation déterministe, contradictions et règles confirmées explicitement. |
 
-FRP-IA-05 ne déclenche aucun apprentissage automatique et n'injecte aucune
-leçon dans le prompt. L'évaluation approfondie et la consolidation restent
-respectivement réservées à FRP-IA-06 et FRP-IA-07.
+La consolidation FRP-IA-07 recalcule les preuves actives d'un candidat,
+ignore les expériences invalidées et conserve les liens exacts. Une règle
+n'est créée qu'après confirmation explicite de l'application et n'est pas
+injectée dans les prompts ; cette intégration appartient à FRP-IA-13.
 
 ## Actions et sécurité
 

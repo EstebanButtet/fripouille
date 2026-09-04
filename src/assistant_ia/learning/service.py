@@ -8,9 +8,11 @@ from datetime import datetime, timezone
 from assistant_ia.actions.result import ActionExecutionResult
 
 from assistant_ia.learning.models import (
+    BehavioralConsolidation,
     BehavioralExperience,
     BehavioralLessonCandidate,
     ExperienceProvenance,
+    ConfirmedBehavioralRule,
 )
 from assistant_ia.learning.outcomes import (
     BehavioralAttempt,
@@ -220,6 +222,90 @@ class BehavioralLearningService:
             rationale=rationale,
         )
 
+    def consolidate_lesson_candidate(
+        self, candidate: BehavioralLessonCandidate,
+    ) -> BehavioralConsolidation:
+        """Recalculer une synthèse explicable, sans modifier la base."""
+        if not isinstance(candidate, BehavioralLessonCandidate):
+            raise TypeError("Consolidation requires a BehavioralLessonCandidate.")
+        stored = self._repository.get_lesson_candidate(candidate.id)
+        if stored is None or stored != candidate:
+            raise BehavioralLearningScopeError("Consolidation requires a current candidate.")
+        experiences = tuple(
+            self._repository.get_experience(source_id)
+            for source_id in candidate.source_experience_ids
+        )
+        if any(item is None for item in experiences):
+            raise BehavioralLearningScopeError("Consolidation source is missing.")
+        active = tuple(item for item in experiences if item is not None and item.status == "active")
+        excluded = tuple(item.id for item in experiences if item is not None and item.status != "active")
+        seen: dict[tuple[object, ...], int] = {}
+        duplicates: list[int] = []
+        unique: list[BehavioralExperience] = []
+        for item in active:
+            key = (
+                item.provenance.source_type,
+                item.provenance.source_reference,
+                item.provenance.source_text,
+            ) if item.provenance.source_text is not None else (item.id,)
+            if key in seen:
+                duplicates.append(item.id)
+            else:
+                seen[key] = item.id
+                unique.append(item)
+        candidate_strategy = _comparison_text(candidate.proposed_strategy)
+        favorable: list[int] = []
+        contradictory: list[int] = []
+        ambiguous: list[int] = []
+        for item in unique:
+            if _comparison_text(item.strategy) != candidate_strategy:
+                contradictory.append(item.id)
+            elif item.outcome_status in {"success", "partial"}:
+                favorable.append(item.id)
+            else:
+                ambiguous.append(item.id)
+        return BehavioralConsolidation(
+            candidate_id=candidate.id,
+            relevant_experience_ids=tuple(item.id for item in unique),
+            favorable_experience_ids=tuple(favorable),
+            contradictory_experience_ids=tuple(contradictory),
+            ambiguous_experience_ids=tuple(ambiguous),
+            excluded_experience_ids=excluded,
+            duplicate_experience_ids=tuple(duplicates),
+        )
+
+    def confirm_active_person_lesson(
+        self, candidate: BehavioralLessonCandidate, confirmation_note: str,
+    ) -> ConfirmedBehavioralRule:
+        person_id = self._require_active_person_id()
+        if candidate.person_id != person_id:
+            raise BehavioralLearningScopeError("Candidate does not belong to the active person.")
+        summary = self.consolidate_lesson_candidate(candidate)
+        if not summary.can_be_confirmed:
+            raise ValueError("Candidate needs favorable evidence without contradictions.")
+        return self._confirm(candidate, summary, confirmation_note)
+
+    def confirm_global_lesson(
+        self, candidate: BehavioralLessonCandidate, confirmation_note: str,
+    ) -> ConfirmedBehavioralRule:
+        if candidate.person_id is not None:
+            raise BehavioralLearningScopeError("Candidate is not global.")
+        summary = self.consolidate_lesson_candidate(candidate)
+        if not summary.can_be_confirmed:
+            raise ValueError("Candidate needs favorable evidence without contradictions.")
+        return self._confirm(candidate, summary, confirmation_note)
+
+    def _confirm(self, candidate: BehavioralLessonCandidate, summary: BehavioralConsolidation, note: str) -> ConfirmedBehavioralRule:
+        if not isinstance(note, str) or not note.strip():
+            raise ValueError("Rule confirmation note cannot be empty.")
+        return self._repository.create_confirmed_rule(
+            person_id=candidate.person_id,
+            context_pattern=candidate.context_pattern,
+            proposed_strategy=candidate.proposed_strategy,
+            rationale=f"{candidate.rationale} Confirmation: {note.strip()}",
+            source_experience_ids=summary.relevant_experience_ids,
+        )
+
     @property
     def repository(self) -> BehavioralLearningRepository:
         """Exposer le repository aux outils applicatifs d'inspection/correction."""
@@ -292,3 +378,7 @@ def _normalized_now(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("Learning service clock must return a timezone-aware datetime.")
     return value.astimezone(timezone.utc)
+
+
+def _comparison_text(value: str) -> str:
+    return " ".join(value.casefold().split())

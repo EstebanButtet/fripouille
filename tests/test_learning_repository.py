@@ -201,11 +201,10 @@ class BehavioralLearningRepositoryTests(unittest.TestCase):
         with self.database.connect() as connection:
             rule_tables = connection.execute(
                 """
-                SELECT name FROM sqlite_master
-                WHERE type = 'table' AND name LIKE '%rule%'
+                SELECT COUNT(*) FROM behavioral_rules
                 """
             ).fetchall()
-        self.assertEqual(rule_tables, [])
+        self.assertEqual(rule_tables, [(0,)])
         with self.assertRaises(BehavioralExperienceInUseError):
             repository.delete_experience(experience.id)
 

@@ -620,6 +620,8 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 ("behavioral_experiences",),
                 ("behavioral_lesson_candidates",),
                 ("behavioral_lesson_sources",),
+                ("behavioral_rule_sources",),
+                ("behavioral_rules",),
                 ("journal_entries",),
                 ("memories",),
                 ("memory_people",),
@@ -934,6 +936,8 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
                 ("behavioral_experiences",),
                 ("behavioral_lesson_candidates",),
                 ("behavioral_lesson_sources",),
+                ("behavioral_rule_sources",),
+                ("behavioral_rules",),
                 ("journal_entries",),
                 ("memories",),
                 ("memory_people",),
@@ -1194,6 +1198,20 @@ class SQLiteDatabaseInitializationTests(unittest.TestCase):
             row,
             ("Contexte v8", "unknown", "reported_result", None, None, None, "[]"),
         )
+
+    def test_migrates_v9_to_v10_creating_empty_rule_domain(self) -> None:
+        self._create_version_eight_schema()
+        with self.database.connect() as connection:
+            repository_module._migrate_schema_8_to_9(connection)
+            connection.execute("UPDATE schema_version SET version = 9 WHERE id = 1")
+        self.database.initialize()
+        with self.database.connect() as connection:
+            version = connection.execute("SELECT version FROM schema_version WHERE id = 1").fetchone()
+            rules = connection.execute("SELECT COUNT(*) FROM behavioral_rules").fetchone()
+            sources = connection.execute("SELECT COUNT(*) FROM behavioral_rule_sources").fetchone()
+        self.assertEqual(version, (CURRENT_SCHEMA_VERSION,))
+        self.assertEqual(rules, (0,))
+        self.assertEqual(sources, (0,))
 
     def test_initialize_does_not_duplicate_default_person(self) -> None:
         """Repeated storage initialization should retain one default row."""

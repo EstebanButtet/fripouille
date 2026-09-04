@@ -216,6 +216,7 @@ Ordre conseillé :
 2. `src/assistant_ia/learning/models.py`
 3. `src/assistant_ia/learning/repository.py`
 4. `src/assistant_ia/learning/service.py`
+5. `tests/test_learning_consolidation.py`
 
 Une `BehavioralExperience` n'est ni un souvenir ni une observation sociale :
 elle décrit une stratégie tentée dans un contexte et son résultat. Sa
@@ -224,8 +225,9 @@ personne persistante déjà résolue par l'application.
 
 Une `BehavioralLessonCandidate` cite au moins une expérience source. Même
 ainsi, elle ne constitue jamais une règle confirmée. FRP-IA-05 ne l'injecte
-pas dans les prompts et ne la crée pas automatiquement ; FRP-IA-06 et 07
-porteront respectivement l'évaluation approfondie et la consolidation.
+pas dans les prompts et ne la crée pas automatiquement. FRP-IA-06 structure
+les retours explicites ; FRP-IA-07 consolide les preuves et exige une
+confirmation applicative explicite avant de créer une règle réversible.
 
 ## Niveau 5 — comprendre les actions et la sécurité
 
@@ -361,7 +363,7 @@ fonctionnalités existantes :
 - FRP-IA-04 profils et relations : terminé ;
 - FRP-IA-05 fondations de l'apprentissage comportemental : terminé ;
 - FRP-IA-06 retour d'expérience : terminé ;
-- FRP-IA-07 consolidation : futur ;
+- FRP-IA-07 consolidation : terminé ;
 - FRP-IA-08 état interne : futur ;
 - FRP-IA-09 voix : futur ;
 - FRP-IA-10 vrai visage : futur ;

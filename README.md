@@ -156,7 +156,7 @@ The default database is created outside the repository under
 .\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
-The current repository state passes **695 tests**. This count describes the
+The current repository state passes **701 tests**. This count describes the
 present revision and will evolve with the project.
 
 ## Repository guide
@@ -176,7 +176,7 @@ present revision and will evolve with the project.
 
 ## Roadmap
 
-The completed baseline covers FRP-IA-00 through FRP-IA-06, including the
+The completed baseline covers FRP-IA-00 through FRP-IA-07, including the
 FRP-IA-02B GUI, contextual memory, persistent people/social context and
 behavioral-learning foundations and structured experience feedback. The next planned stages are
 feedback, consolidation, internal state, voice, face and expressions, social

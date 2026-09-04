@@ -72,7 +72,7 @@ An intent is therefore a proposal, not an executed action.
 | Profile facts | Confirmed, person-scoped facts promoted from separate candidates | Implemented and bounded in active-person context |
 | Memory | Confirmed memories, optional person links and scoped contextual retrieval | Implemented through FRP-IA-04D |
 | Relationships | Optional bounded relationship and unconfirmed observations per person | Implemented and bounded in active-person context |
-| Learning | Inspectable experiences and sourced lesson candidates, without stable rules | Foundations implemented through FRP-IA-05 |
+| Learning | Inspectable experiences, evidence consolidation and reversible confirmed rules | Implemented through FRP-IA-07 |
 | Internal state | Persistent or evolving assistant state distinct from identity | Not implemented |
 | Roles | Future contextual roles and professions, distinct from the identity's descriptive role field | Not implemented |
 | Actions | Registered deterministic capabilities with validated parameters | Implemented |
@@ -176,9 +176,14 @@ typés (approbation, désapprobation, correction ou réessai) et les mesures son
 factuelles, sans score universel. Une issue technique reste distincte d'une
 évaluation comportementale ; une tentative non exécutée n'est pas persistée.
 Le résultat connu de l'application prime toujours sur une interprétation LLM.
-La consolidation et la promotion vers une règle restent réservées à FRP-IA-07.
-FRP-IA-07 remains responsible for comparison, contradiction handling,
-consolidation, validation/rejection and any future stable behavioral rule.
+La consolidation FRP-IA-07 recalcule une synthèse déterministe des preuves
+actives (favorables, contradictoires, ambiguës, invalidées et doublons de
+provenance). Une règle n'est créée qu'après confirmation explicite de
+l'application ; elle conserve ses sources, est invalidable/supprimable et
+n'est pas injectée dans les prompts. L'intégration appartient à FRP-IA-13.
+FRP-IA-07 now provides comparison, contradiction handling, consolidation,
+explicit validation/rejection and reversible confirmed behavioral rules.
+Their future use in prompts remains reserved for FRP-IA-13.
 Identity, roles and internal state have no dependency on the learning models.
 
 ## Interfaces and embodiment

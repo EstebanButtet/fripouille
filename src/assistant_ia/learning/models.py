@@ -22,6 +22,7 @@ ExperienceSourceType = Literal[
     "external_system",
 ]
 LearningRecordStatus = Literal["active", "invalidated"]
+BehavioralRuleConfirmation = Literal["explicit_application_confirmation"]
 
 ALLOWED_EXPERIENCE_SOURCE_TYPES = frozenset(
     {
@@ -32,6 +33,86 @@ ALLOWED_EXPERIENCE_SOURCE_TYPES = frozenset(
     }
 )
 ALLOWED_LEARNING_RECORD_STATUSES = frozenset({"active", "invalidated"})
+
+
+@dataclass(frozen=True, slots=True)
+class BehavioralConsolidation:
+    """Synthèse déterministe recalculée à partir des preuves d'un candidat."""
+
+    candidate_id: int
+    relevant_experience_ids: tuple[int, ...]
+    favorable_experience_ids: tuple[int, ...]
+    contradictory_experience_ids: tuple[int, ...]
+    ambiguous_experience_ids: tuple[int, ...]
+    excluded_experience_ids: tuple[int, ...]
+    duplicate_experience_ids: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        for name in (
+            "relevant_experience_ids", "favorable_experience_ids",
+            "contradictory_experience_ids", "ambiguous_experience_ids",
+            "excluded_experience_ids", "duplicate_experience_ids",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, tuple) or any(
+                isinstance(item, bool) or not isinstance(item, int) or item < 1
+                for item in value
+            ):
+                raise TypeError(f"{name} must contain positive integer identifiers.")
+            if len(set(value)) != len(value):
+                raise ValueError(f"{name} identifiers must be unique.")
+        object.__setattr__(self, "candidate_id", _validate_identifier(self.candidate_id, "Candidate"))
+
+    @property
+    def has_contradictions(self) -> bool:
+        return bool(self.contradictory_experience_ids)
+
+    @property
+    def can_be_confirmed(self) -> bool:
+        return (
+            bool(self.favorable_experience_ids)
+            and not self.has_contradictions
+            and not self.ambiguous_experience_ids
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class ConfirmedBehavioralRule:
+    """Règle comportementale confirmée explicitement et liée à ses preuves."""
+
+    id: int
+    person_id: int | None
+    context_pattern: str
+    proposed_strategy: str
+    rationale: str
+    source_experience_ids: tuple[int, ...]
+    confirmation: BehavioralRuleConfirmation
+    status: LearningRecordStatus
+    invalidation_reason: str | None
+    confirmed_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        created = _normalize_datetime(self.created_at, "Rule creation time")
+        updated = _normalize_datetime(self.updated_at, "Rule update time")
+        confirmed = _normalize_datetime(self.confirmed_at, "Rule confirmation time")
+        if updated < created or confirmed < created:
+            raise ValueError("Rule timestamps are inconsistent.")
+        status, reason = _normalize_status(self.status, self.invalidation_reason, subject="Rule")
+        if self.confirmation != "explicit_application_confirmation":
+            raise ValueError("Unknown behavioral rule confirmation.")
+        source_ids = _normalize_source_ids(self.source_experience_ids)
+        object.__setattr__(self, "id", _validate_identifier(self.id, "Rule"))
+        object.__setattr__(self, "person_id", _validate_optional_identifier(self.person_id, "Person"))
+        for field, label in (("context_pattern", "Rule context pattern"), ("proposed_strategy", "Rule strategy"), ("rationale", "Rule rationale")):
+            object.__setattr__(self, field, _normalize_required_text(getattr(self, field), label))
+        object.__setattr__(self, "source_experience_ids", source_ids)
+        object.__setattr__(self, "status", status)
+        object.__setattr__(self, "invalidation_reason", reason)
+        object.__setattr__(self, "confirmed_at", confirmed)
+        object.__setattr__(self, "created_at", created)
+        object.__setattr__(self, "updated_at", updated)
 
 
 @dataclass(frozen=True, slots=True)
