@@ -32,6 +32,7 @@ from assistant_ia.actions.registry import (
 )
 from assistant_ia.actions.result import ActionExecutionResult
 from assistant_ia.core.context import ConversationContext
+from assistant_ia.internal_state import InternalStateService, StateEvent
 from assistant_ia.identity.defaults import build_default_identity
 from assistant_ia.intelligence.intent import Intent
 from assistant_ia.intelligence.memory_candidates import (
@@ -155,6 +156,7 @@ class AssistantCore:
         behavioral_learning_service: (
             BehavioralLearningService | None
         ) = None,
+        internal_state: InternalStateService | None = None,
     ) -> None:
         """Créer le coeur avec les dépendances fournies ou leurs valeurs par défaut.
 
@@ -263,6 +265,8 @@ class AssistantCore:
             ProfileFactPromotionProposal | None
         ) = None
         self._behavioral_learning_service = behavioral_learning_service
+        self.internal_state = internal_state if internal_state is not None else InternalStateService()
+        self._state_person = (self._person_context.active_person_id, self._person_context.active_person)
 
     @property
     def context(self) -> ConversationContext:
@@ -344,6 +348,37 @@ class AssistantCore:
         return self._pending_profile_fact_promotion
 
     def process_message(self, user_message: str) -> str:
+        """Suivre les événements réels autour de l'unique pipeline métier."""
+        self._sync_state_person()
+        self.internal_state.transition(StateEvent.TURN_STARTED)
+        # Une confirmation peut retourner tôt : ne pas réutiliser son ancien résultat.
+        self._last_action_result = None
+        try:
+            response = self._process_message(user_message)
+        except Exception:
+            self.internal_state.transition(StateEvent.ERROR)
+            raise
+        result = self._last_action_result
+        if result is not None:
+            event = {"success": StateEvent.ACTION_SUCCEEDED,
+                     "error": StateEvent.ACTION_FAILED,
+                     "cancelled": StateEvent.CANCELLED}[result.status]
+            self.internal_state.transition(event, action=result.action_name)
+        elif self._pending_memory_promotion or self._pending_profile_fact_promotion:
+            self.internal_state.transition(StateEvent.CONFIRMATION_REQUIRED)
+        elif self._last_intent is not None and self._last_intent.name == "unknown":
+            self.internal_state.transition(StateEvent.INFORMATION_REQUIRED)
+        else:
+            self.internal_state.transition(StateEvent.TURN_COMPLETED)
+        return response
+
+    def _sync_state_person(self) -> None:
+        person = (self._person_context.active_person_id, self._person_context.active_person)
+        if person != self._state_person:
+            self.internal_state.transition(StateEvent.PERSON_CHANGED)
+            self._state_person = person
+
+    def _process_message(self, user_message: str) -> str:
         """Traiter un message et retourner le texte brut résolu du coeur.
 
         La méthode peut écrire via une action autorisée ou une promotion de
@@ -401,6 +436,7 @@ class AssistantCore:
                 return resolution_response
 
         # 3. Le client produit à la fois un texte et une intention structurée.
+        self._sync_state_person()
         # Le coeur ne fait confiance qu'aux objets déjà validés par ce client.
         try:
             model_response = self._model_client.generate_response(
@@ -520,6 +556,7 @@ class AssistantCore:
         sont oubliés. Les souvenirs, tâches et entrées de journal persistent.
         """
         self._context.clear()
+        self.internal_state.transition(StateEvent.RESET)
         self._person_context.reset()
         self._last_intent = None
         self._last_action_result = None

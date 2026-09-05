@@ -14,6 +14,7 @@ Pour une découverte pédagogique progressive du projet, lire
 | `src/assistant_ia/__main__.py` | Sélection de l'interface terminal ou GUI. |
 | `src/assistant_ia/application.py` | Assemblage de `AssistantCore` et `AssistantRuntime`. |
 | `src/assistant_ia/runtime.py` | Frontière des interfaces, réponse user-facing et diagnostic du tour. |
+| `src/assistant_ia/internal_state.py` | FRP-IA-08 : état fonctionnel de session et transitions applicatives déterministes. |
 
 ## Conversation
 
