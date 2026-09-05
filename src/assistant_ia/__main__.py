@@ -35,6 +35,10 @@ def _build_argument_parser() -> argparse.ArgumentParser:
         help="utiliser l'interface graphique provisoire",
     )
     parser.add_argument(
+        "--voice", action="store_true",
+        help="activer /listen dans le terminal (voix locale Windows)",
+    )
+    parser.add_argument(
         "--debug",
         action="store_true",
         help="afficher les diagnostics techniques dans la console",
@@ -50,6 +54,11 @@ def main(argv: list[str] | None = None) -> None:
     tardif afin que le terminal reste utilisable même si tkinter est absent.
     """
     arguments = _build_argument_parser().parse_args(argv)
+    if arguments.voice:
+        if arguments.gui:
+            _build_argument_parser().error("--voice est disponible dans le terminal uniquement")
+        run_terminal(debug=arguments.debug, voice=True)
+        return
 
     if arguments.gui:
         # tkinter n'est nécessaire que dans ce chemin. Cette frontière évite

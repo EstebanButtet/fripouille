@@ -83,7 +83,7 @@ def request_terminal_confirmation(
     }
 
 
-def run_terminal(*, debug: bool = False) -> None:
+def run_terminal(*, debug: bool = False, voice: bool = False) -> None:
     """Construire le runtime puis gérer la boucle interactive.
 
     Une seule instance est conservée pendant la boucle, ce qui préserve le
@@ -108,6 +108,13 @@ def run_terminal(*, debug: bool = False) -> None:
         )
         return
 
+    voice_controller = None
+    if voice:
+        from assistant_ia.voice import VoiceController
+        from assistant_ia.windows_speech import WindowsSpeechToText, WindowsTextToSpeech
+        voice_controller = VoiceController(runtime, WindowsSpeechToText(), WindowsTextToSpeech())
+        print("/listen : un tour vocal local. Ctrl+C arrête. Le texte reste disponible.")
+
     # Les commandes d'interface sont résolues avant ``process_message`` : elles
     # restent du contrôle terminal et ne peuvent devenir des intentions LLM.
     while True:
@@ -118,6 +125,13 @@ def run_terminal(*, debug: bool = False) -> None:
                 continue
 
             normalized_message = user_message.casefold()
+
+            if normalized_message == "/listen" and voice_controller is not None:
+                turn = voice_controller.run_once()
+                if turn.transcript:
+                    print(f"Transcription : {turn.transcript}")
+                display_assistant_message(turn.response or turn.error or f"Audio : {turn.status}.")
+                continue
 
             if normalized_message == COMMAND_QUIT:
                 display_assistant_message("À bientôt.")
