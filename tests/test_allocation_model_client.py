@@ -156,7 +156,7 @@ class AllocationModelClientTests(unittest.TestCase):
             payload["options"],
             {
                 "temperature": 0,
-                "num_ctx": 4096,
+                "num_ctx": 8192,
             },
         )
 

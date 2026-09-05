@@ -487,6 +487,9 @@ class AssistantCore:
             model_response=model_response,
             intent=resolved_intent,
         )
+        if resolved_intent.name == "conversation":
+            from assistant_ia.intelligence.action_truth import truthful_conversation
+            assistant_content = truthful_conversation(assistant_content, user_message)
 
         # 5. Un candidat de profil exige un sujet persistant résolu par
         # l'application. Le modèle d'analyse ne reçoit jamais cet ID dans son

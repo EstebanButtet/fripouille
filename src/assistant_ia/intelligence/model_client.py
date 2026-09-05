@@ -303,6 +303,11 @@ class OllamaModelClient:
         )
         intent = interpretation.intent
 
+        from assistant_ia.intelligence.action_truth import grounded_action, CLARIFY_ACTION
+        if not grounded_action(intent, turn.current_user_message.content):
+            return ModelResponse(content=CLARIFY_ACTION, model=interpretation.model,
+                                 intent=Intent(name="conversation"))
+
         if intent.name != "conversation":
             # AssistantCore remettra l'intention au registre. Le client ne
             # contacte aucune action et ne reprend pas un texte libre d'Ollama.

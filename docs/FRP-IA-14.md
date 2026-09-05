@@ -65,3 +65,29 @@ Deux changements de configuration retirent le principal coût observé sans
 appauvrir le contexte. Le démarrage à froid reste distinct du dialogue à chaud.
 La priorité suivante est la capture et la transcription locales persistantes,
 sans diffusion prématurée de texte qui n'aurait pas passé les contrôles.
+
+## Sincérité action/conversation
+
+Le prompt contenait déjà l'interdiction de prétendre agir en conversation.
+Le coeur renvoyait néanmoins le texte libre tel quel. `action_truth.py` filtre
+désormais les formulations françaises courantes de faux accusés/promesses et
+les demandes de tâche mal classées, dont la transcription rapportée avec Arnaud.
+La réponse contrôlée annonce l'absence d'exécution et demande une action précise.
+Le client Ollama vérifie la preuve lexicale des titres/contenus persistants avec
+le validateur existant des candidats mémoire ; une date sans indice temporel
+dans la source est rejetée. Aucun nom ou paramètre manquant n'est rempli.
+
+Limite explicite : le filtre de texte est conservateur et lexical, pas une preuve
+universelle de sincérité de toute paraphrase possible. Il peut refuser une citation
+ou une paraphrase légitime ; reformuler une action explicite permet de poursuivre.
+La cohérence détaillée d'une date proposée reste soumise au parseur métier existant.
+Seul ActionExecutionResult constitue une preuve d'exécution ; aucun filtre de
+langage ne donne de permissions ni d'accès matériel. Le cas rapporté est testé
+jusqu'à l'historique, sans prénom inventé ni résultat d'action.
+
+## Carnet — sincérité
+
+La mauvaise transcription et la promesse hallucinée avaient deux causes distinctes.
+La règle de prompt seule ne suffisait pas : une clarification applicative protège
+maintenant le cas observé et les paramètres textuels non étayés. Le contrôle reste
+inspectable et ses limites linguistiques sont annoncées, sans construire un agent.

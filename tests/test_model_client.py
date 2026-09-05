@@ -175,6 +175,7 @@ class OllamaModelClientTests(unittest.TestCase):
         self,
     ) -> None:
         """A valid interpreted action should become a ModelResponse."""
+        self.messages = (ConversationMessage("user", "Crée une tâche Réviser la biologie pour demain."),)
         raw_response = build_interpretation_response(
             name="create_task",
             parameters={

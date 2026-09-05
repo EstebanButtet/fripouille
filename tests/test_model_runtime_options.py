@@ -88,7 +88,7 @@ class ModelRuntimeOptionsTests(unittest.TestCase):
             )
             self.assertEqual(
                 options["num_ctx"],
-                4096,
+                8192,
             )
 
 
