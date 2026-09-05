@@ -44,3 +44,24 @@ L'instrumentation distingue les millisecondes Python des secondes perdues dans
 les rechargements Ollama et la connexion localhost. Les lectures métier ne sont
 pas le goulet principal. La décision est de stabiliser le contexte et l'adresse
 locale avant d'évaluer les modèles vocaux dans un environnement séparé.
+
+## Optimisation mesurée
+
+L'adresse par défaut est 127.0.0.1 ; l'URL reste injectable. Toutes les phases
+utilisent 8192 tokens pour garder le même runner Ollama. Aucun cache cognitif,
+aucune suppression d'analyse, aucun changement de schéma ou de prompt métier.
+69 tests ciblés passent. Le premier tour après changement coûte encore 26,20 s
+(dont 21,26 s de chargement unique) ; le suivant 3,01 s. Une seconde exécution
+à chaud (`logs/ia14-after-warm.json`) donne 3,07 et 2,89 s : médiane 2,98 s,
+contre 53,02 s avant. Les durées de chargement suivantes sont 1,5–2,6 ms.
+Le tour hors LLM reste 9,72 ms ; contexte 3,66 ms ; social 2,39 ms ; mémoire
+3,39 ms ; règles 1,05 ms ; prompt 0,024 ms. Pas de gain Python revendiqué.
+Ces comparaisons utilisent les mêmes fixtures et requêtes ; le cache de préfixes
+Ollama contribue au résultat à chaud. La latence vocale reste à mesurer.
+
+## Carnet — optimisation
+
+Deux changements de configuration retirent le principal coût observé sans
+appauvrir le contexte. Le démarrage à froid reste distinct du dialogue à chaud.
+La priorité suivante est la capture et la transcription locales persistantes,
+sans diffusion prématurée de texte qui n'aurait pas passé les contrôles.

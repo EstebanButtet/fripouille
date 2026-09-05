@@ -91,6 +91,8 @@ class CognitiveIntegrationTests(unittest.TestCase):
         self.assertEqual(trace.cognitive.rule_ids, (rule.id,))
         self.assertNotIn("source_experience_ids", self.prompt())
         self.assertEqual(self.payloads[-1]["options"]["num_ctx"], 8192)
+        self.assertEqual(self.payloads[0]["options"]["num_ctx"],
+                         self.payloads[-1]["options"]["num_ctx"])
 
     def test_b_other_person_rule_never_injected(self):
         other = self.rule(self.other.id, "Secret personnel Alice.")
