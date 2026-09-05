@@ -136,6 +136,9 @@ class VoiceProcess:
                 if event.get("status") != "ok":
                     raise AudioError("Moteur vocal indisponible : " + str(event.get("error", "erreur"))[:300])
                 return event
+        except KeyboardInterrupt:
+            self.close()
+            raise
         except (OSError, ValueError) as error:
             self.close()
             raise AudioError("Échange avec le moteur vocal impossible.") from error
@@ -198,3 +201,8 @@ class FallbackSpeechToText:
 
     def close(self):
         self.primary.close()
+
+    def listen_interruptible(self, cancel, on_speech):
+        if self.degraded:
+            raise AudioError("Interruption vocale indisponible avec System.Speech ; utilisez le mode sans barge-in.")
+        return self.primary.listen_interruptible(cancel, on_speech)

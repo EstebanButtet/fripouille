@@ -83,7 +83,8 @@ def request_terminal_confirmation(
     }
 
 
-def run_terminal(*, debug: bool = False, voice: bool = False) -> None:
+def run_terminal(*, debug: bool = False, voice: bool = False,
+                 continuous_voice: bool = False, barge_in: bool = False) -> None:
     """Construire le runtime puis gérer la boucle interactive.
 
     Une seule instance est conservée pendant la boucle, ce qui préserve le
@@ -91,6 +92,7 @@ def run_terminal(*, debug: bool = False, voice: bool = False) -> None:
     effacer les données SQLite ; ``/quit`` ne passe jamais par Ollama.
     """
     display_welcome()
+    voice = voice or continuous_voice
 
     try:
         if debug:
@@ -114,8 +116,32 @@ def run_terminal(*, debug: bool = False, voice: bool = False) -> None:
     if voice:
         from assistant_ia.voice import VoiceController
         from assistant_ia.windows_speech import WindowsSpeechToText, WindowsTextToSpeech
-        voice_controller = VoiceController(runtime, WindowsSpeechToText(), WindowsTextToSpeech())
-        print("/listen : un tour vocal local. Ctrl+C arrête. Le texte reste disponible.")
+        from assistant_ia.voice_process import VoiceConfig, VoiceProcess, LocalSpeechToText, FallbackSpeechToText
+        try:
+            primary = LocalSpeechToText(VoiceProcess(VoiceConfig.local()))
+            stt = FallbackSpeechToText(primary, WindowsSpeechToText())
+            voice_controller = VoiceController(runtime, stt, WindowsTextToSpeech(),
+                on_response=display_assistant_message,
+                on_transcript=lambda text: print(f"Transcription : {text}"), barge_in=barge_in)
+        except (ValueError, TypeError) as error:
+            print(f"Configuration vocale invalide : {error}. Le texte reste disponible.")
+        print("/listen : un tour ; /voice : écoute continue ; Ctrl+C revient au texte.")
+        if barge_in: print("Interruption activée : utilisez un casque pour isoler la voix de Fripouille.")
+
+    def listen_continuously():
+        try:
+            voice_controller.run_continuous(
+                lambda turn: print(turn.error) if turn.error else None)
+        except KeyboardInterrupt:
+            voice_controller.stop()
+            print("Écoute arrêtée. Retour au texte.")
+        except AssistantCoreError:
+            display_assistant_message(MODEL_ERROR_MESSAGE)
+        finally:
+            voice_controller.stop()
+
+    if continuous_voice and voice_controller is not None:
+        listen_continuously()
 
     # Les commandes d'interface sont résolues avant ``process_message`` : elles
     # restent du contrôle terminal et ne peuvent devenir des intentions LLM.
@@ -130,9 +156,12 @@ def run_terminal(*, debug: bool = False, voice: bool = False) -> None:
 
             if normalized_message == "/listen" and voice_controller is not None:
                 turn = voice_controller.run_once()
-                if turn.transcript:
-                    print(f"Transcription : {turn.transcript}")
-                display_assistant_message(turn.response or turn.error or f"Audio : {turn.status}.")
+                if not turn.response:
+                    display_assistant_message(turn.error or f"Audio : {turn.status}.")
+                continue
+
+            if normalized_message == "/voice" and voice_controller is not None:
+                listen_continuously()
                 continue
 
             if normalized_message == COMMAND_QUIT:
@@ -164,6 +193,10 @@ def run_terminal(*, debug: bool = False, voice: bool = False) -> None:
             display_assistant_message(
                 MODEL_ERROR_MESSAGE
             )
+
+    if voice_controller is not None:
+        voice_controller.stop()
+        voice_controller.stt.close()
 
 
 if __name__ == "__main__":

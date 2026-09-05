@@ -36,8 +36,10 @@ def _build_argument_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--voice", action="store_true",
-        help="activer /listen dans le terminal (voix locale Windows)",
+        help="activer /listen et /voice dans le terminal (voix locale)",
     )
+    parser.add_argument("--continuous-voice", action="store_true", help="démarrer en écoute continue")
+    parser.add_argument("--barge-in", action="store_true", help="interruption vocale avec casque, exige --continuous-voice")
     parser.add_argument(
         "--debug",
         action="store_true",
@@ -54,6 +56,13 @@ def main(argv: list[str] | None = None) -> None:
     tardif afin que le terminal reste utilisable même si tkinter est absent.
     """
     arguments = _build_argument_parser().parse_args(argv)
+    if arguments.barge_in and not arguments.continuous_voice:
+        _build_argument_parser().error("--barge-in exige --continuous-voice et un casque")
+    if arguments.continuous_voice:
+        if arguments.gui:
+            _build_argument_parser().error("--continuous-voice est disponible dans le terminal uniquement")
+        run_terminal(debug=arguments.debug, voice=True, continuous_voice=True, barge_in=arguments.barge_in)
+        return
     if arguments.voice:
         if arguments.gui:
             _build_argument_parser().error("--voice est disponible dans le terminal uniquement")

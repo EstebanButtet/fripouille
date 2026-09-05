@@ -48,6 +48,31 @@ Sources techniques : [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
 [Silero VAD](https://github.com/snakers4/silero-vad),
 [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS).
 
+## Lancement et interruption
+
+Texte : `.venv/Scripts/python.exe -m assistant_ia`.
+Diagnostic vocal : ajouter `--voice`, puis `/listen` pour un tour ou `/voice`
+pour l'écoute continue. Démarrage direct : `--continuous-voice`.
+Ctrl+C en écoute continue arrête la voix et revient au terminal texte.
+Les confirmations sensibles continuent à demander une saisie terminal explicite.
+La réponse texte est affichée avant la synthèse ; une panne TTS la conserve.
+
+Par défaut la capture est fermée pendant le traitement et la réponse sonore.
+Le mode `--continuous-voice --barge-in` suppose un **casque isolant** : la VAD
+ne sait pas distinguer le haut-parleur de l'utilisateur et aucune AEC n'est
+revendiquée. Une parole soutenue arrête le TTS, garde la nouvelle phrase dans
+un seul emplacement temporaire puis la transmet au runtime après le tour actif.
+La synthèse est collectée avant le prochain tour. Un bruit bref ne déclenche
+pas l'événement de début ; les seuils/hystérésis sont ceux décrits ci-dessus.
+Le repli System.Speech n'offre pas ce mode : revenir à l'écoute sans barge-in.
+
+## Carnet — conversation continue
+
+Le terminal peut maintenant enchaîner les tours sans commande répétée, afficher
+le texte avant le son et revenir au texte sur arrêt. L'interruption repose sur
+une observation VAD soutenue et ne relance aucune action déjà engagée. Le mode
+avec casque est explicite ; l'écho sur haut-parleur reste un sujet distinct à valider.
+
 ## Carnet — providers et STT
 
 Les dépendances ML vivent maintenant dans un worker remplaçable et persistant.

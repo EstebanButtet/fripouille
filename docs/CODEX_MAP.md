@@ -111,11 +111,15 @@ GPIO/PWM/moteur brut ne part du LLM.
 | `src/assistant_ia/interfaces/gui.py` | GUI tkinter provisoire et worker non bloquant. |
 | `src/assistant_ia/interfaces/diagnostics.py` | Diagnostic console explicite. |
 | `src/assistant_ia/voice.py` | FRP-IA-09 : contrats STT/TTS et tour vocal annulable vers le runtime commun. |
+| `src/assistant_ia/voice_process.py` | FRP-IA-14 : worker vocal isolé persistant, IPC borné et repli Windows. |
+| `scripts/voice_worker.py` | Whisper CPU/int8 et Silero ONNX ; installation et usage dans `docs/VOICE.md`. |
 | `src/assistant_ia/windows_speech.py` | Backend local System.Speech, capture et lecture bornées. |
 
 Terminal : `python -m assistant_ia`. GUI : `python -m assistant_ia --gui`.
 Ajouter `--debug` pour les diagnostics console.
 Ajouter `--voice` au terminal pour activer `/listen` (voir `docs/FRP-IA-09.md`).
+FRP-IA-14 : `--continuous-voice` lance l'écoute automatique ; `--barge-in`
+ajoute l'interruption avec casque (voir `docs/VOICE.md`).
 
 ## Hardware
 
