@@ -7,6 +7,7 @@ import base64
 import json
 import os
 import subprocess
+from math import isfinite
 from threading import Event
 from time import monotonic
 
@@ -20,12 +21,13 @@ Add-Type -AssemblyName System.Speech
 _LISTEN = _PRELUDE + """
 $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine([Globalization.CultureInfo]'fr-FR')
 try {
+    $settings = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:FRIPOUILLE_SPEECH_TEXT)) | ConvertFrom-Json
     $engine.LoadGrammar((New-Object System.Speech.Recognition.DictationGrammar))
     $engine.SetInputToDefaultAudioDevice()
     $engine.BabbleTimeout = [TimeSpan]::FromSeconds(8)
     $engine.EndSilenceTimeout = [TimeSpan]::FromMilliseconds(700)
-    $result = $engine.Recognize([TimeSpan]::FromSeconds(5))
-    if ($null -eq $result -or $result.Confidence -lt 0.5) {
+    $result = $engine.Recognize([TimeSpan]::FromSeconds($settings.initial_silence))
+    if ($null -eq $result -or $result.Confidence -lt $settings.minimum_confidence) {
         @{text=$null} | ConvertTo-Json -Compress
     } else {
         @{text=$result.Text} | ConvertTo-Json -Compress
@@ -82,9 +84,15 @@ def _run(script: str, cancel: Event, *, text: str = "", timeout: float = 20) -> 
 
 
 class WindowsSpeechToText:
+    def __init__(self, *, initial_silence: float = 10, minimum_confidence: float = .5):
+        for value, low, high in ((initial_silence, 1, 15), (minimum_confidence, 0, 1)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value) or not low <= value <= high:
+                raise ValueError("Configuration System.Speech invalide.")
+        self.settings = {"initial_silence": initial_silence, "minimum_confidence": minimum_confidence}
+
     def listen(self, cancel: Event) -> str | None:
         try:
-            result = json.loads(_run(_LISTEN, cancel))
+            result = json.loads(_run(_LISTEN, cancel, text=json.dumps(self.settings)))
             text = result["text"]
             if text is not None and (not isinstance(text, str) or len(text) > 2000):
                 raise ValueError("Invalid transcription")

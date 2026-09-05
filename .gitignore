@@ -1,5 +1,7 @@
 ﻿# Environnement virtuel
 .venv/
+.venv-voice/
+.venv-voice-design/
 
 # Cache Python
 __pycache__/

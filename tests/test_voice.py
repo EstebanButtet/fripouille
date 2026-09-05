@@ -90,6 +90,14 @@ class VoiceTests(unittest.TestCase):
         with patch("assistant_ia.windows_speech._run", return_value='{"text":"bonjour"}'):
             self.assertEqual(WindowsSpeechToText().listen(Event()), "bonjour")
 
+    def test_windows_diagnostic_settings_are_bounded_data(self):
+        import json
+        with patch("assistant_ia.windows_speech._run", return_value='{"text":null}') as run:
+            WindowsSpeechToText(minimum_confidence=0).listen(Event())
+            self.assertEqual(json.loads(run.call_args.kwargs["text"])["minimum_confidence"], 0)
+        for value in (-1, 2, float("nan")):
+            with self.assertRaises(ValueError): WindowsSpeechToText(minimum_confidence=value)
+
     def test_windows_stt_rejects_invalid_output(self):
         for value in ('oops', '{}', '{"text":123}'):
             with patch("assistant_ia.windows_speech._run", return_value=value):
