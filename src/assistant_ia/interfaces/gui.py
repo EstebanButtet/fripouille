@@ -5,8 +5,8 @@ tkinter. Le traitement potentiellement lent du runtime s'effectue dans un
 thread worker afin de ne pas bloquer la boucle graphique ; toute modification
 des widgets revient ensuite sur le thread tkinter grâce à ``root.after``.
 
-Le visage dessiné ici est un substitut temporaire, pas le « vrai visage » futur
-de FRP-IA-10. Cette interface n'ajoute aucune capacité au coeur et, faute de
+Le visage FRP-IA-10 consomme des intentions expressives contrôlées et reprend
+le contour du prototype vectoriel audité. Faute de
 handler de confirmation GUI, les actions sensibles restent refusées par défaut.
 """
 
@@ -27,6 +27,8 @@ from assistant_ia.interfaces.diagnostics import (
     display_runtime_error,
 )
 from assistant_ia.runtime import AssistantRuntime
+from assistant_ia.expressions import Expression, ExpressiveIntent
+from assistant_ia.interfaces.face import CanvasFacePresenter
 
 WINDOW_TITLE = "Fripouille"
 INITIAL_ASSISTANT_MESSAGE = "Salut. Moi, c'est Fripouille."
@@ -152,7 +154,9 @@ class FripouilleWindow:
         content = tk.Frame(root, background="#20242b")
         content.pack(fill=tk.BOTH, expand=True, padx=24, pady=24)
 
-        self._create_face(content).pack(
+        self._face_canvas = self._create_face(content)
+        self._face_presenter = CanvasFacePresenter(self._face_canvas)
+        self._face_canvas.pack(
             side=tk.LEFT,
             padx=(0, 24),
             anchor=tk.N,
@@ -220,6 +224,7 @@ class FripouilleWindow:
         self._send_button.pack(side=tk.LEFT, padx=(10, 0))
 
         self._render_state()
+        self._refresh_face()
         self._entry.focus_set()
 
     @staticmethod
@@ -246,7 +251,7 @@ class FripouilleWindow:
 
     @staticmethod
     def _create_face(parent: tk.Misc) -> tk.Canvas:
-        """Créer le widget de visage provisoire destiné à être remplacé."""
+        """Créer le support local des intentions expressives FRP-IA-10."""
         face = tk.Canvas(
             parent,
             width=170,
@@ -254,29 +259,15 @@ class FripouilleWindow:
             background="#20242b",
             highlightthickness=0,
         )
-        face.create_oval(
-            12,
-            12,
-            158,
-            158,
-            fill="#f5d36c",
-            outline="#17191d",
-            width=3,
-        )
-        face.create_oval(52, 58, 68, 78, fill="#17191d")
-        face.create_oval(102, 58, 118, 78, fill="#17191d")
-        face.create_arc(
-            50,
-            72,
-            120,
-            130,
-            start=200,
-            extent=140,
-            style=tk.ARC,
-            outline="#17191d",
-            width=4,
-        )
         return face
+
+    def _refresh_face(self) -> None:
+        # Ce consommateur ne touche aux widgets que dans le thread Tk.
+        intent = (ExpressiveIntent(Expression.FOCUSED, "processing")
+                  if self._controller.state.is_waiting
+                  else self._controller.runtime.expressions.current)
+        self._face_presenter.present_expression(intent)
+        self._root.after(200, self._refresh_face)
 
     def _submit_message(self, event: object | None = None) -> str:
         """Valider la saisie et lancer un seul worker de réponse.

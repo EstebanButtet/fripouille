@@ -26,6 +26,8 @@ Pour une découverte pédagogique progressive du projet, lire
 | `src/assistant_ia/intelligence/model_client.py` | Client Ollama, interprétation puis génération. |
 | `src/assistant_ia/intelligence/prompt.py` | Prompts, règles opérationnelles et personnalité. |
 | `src/assistant_ia/interfaces/presentation.py` | Texte naturel sans plomberie technique. |
+| `src/assistant_ia/expressions.py` | FRP-IA-10 : intention expressive contrôlée, politique et expiration. |
+| `src/assistant_ia/interfaces/face.py` | Rendu local Canvas du contour vectoriel audité ; aucun protocole matériel nouveau. |
 
 ## Identité
 

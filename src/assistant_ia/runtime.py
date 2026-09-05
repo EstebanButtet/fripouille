@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from assistant_ia.core.assistant import AssistantCore
+from assistant_ia.expressions import ExpressionController, expression_for_state
 from assistant_ia.actions.result import ActionExecutionResult
 from assistant_ia.intelligence.intent import Intent
 from assistant_ia.interfaces.presentation import (
@@ -85,6 +86,7 @@ class AssistantRuntime:
         self._assistant = assistant
         self._presenter = presenter
         self._diagnostic_reporter = diagnostic_reporter
+        self.expressions = ExpressionController()
 
     @property
     def assistant(self) -> AssistantCore:
@@ -103,9 +105,10 @@ class AssistantRuntime:
         """
         # 1. Le coeur reste l'unique endroit qui interprète et exécute le
         # message. Le runtime ne tente pas de déduire une intention lui-même.
-        raw_response = self._assistant.process_message(
-            user_message
-        )
+        try:
+            raw_response = self._assistant.process_message(user_message)
+        finally:
+            self.expressions.show(expression_for_state(self._assistant.internal_state.snapshot))
         # 2. La photographie est construite immédiatement après le traitement
         # pour que tous ses champs décrivent exactement le même tour.
         diagnostics = TurnDiagnostics(
@@ -149,3 +152,4 @@ class AssistantRuntime:
     def reset_conversation(self) -> None:
         """Demander au coeur d'oublier l'état conversationnel temporaire."""
         self._assistant.reset_conversation()
+        self.expressions.reset()
