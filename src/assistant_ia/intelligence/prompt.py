@@ -12,6 +12,7 @@ autoritatives. Les prompts décrivent le comportement actuel : l'identité
 from __future__ import annotations
 
 import json
+from assistant_ia.cognitive_context import CognitiveContextSnapshot
 
 from assistant_ia.capabilities.context import (
     CapabilityContext,
@@ -768,6 +769,7 @@ def build_conversation_prompt(
     capability_context: CapabilityContext | None = None,
     social_context: SocialContext | None = None,
     contextual_memories: tuple[RetrievedMemory, ...] = (),
+    cognitive_context: CognitiveContextSnapshot | None = None,
 ) -> str:
     """Construire le prompt consacré uniquement à la conversation naturelle.
 
@@ -812,6 +814,11 @@ def build_conversation_prompt(
             )
         )
 
+    if cognitive_context is not None:
+        if not isinstance(cognitive_context, CognitiveContextSnapshot):
+            raise TypeError("Cognitive context must be an application snapshot.")
+        if cognitive_context.prompt_section:
+            sections.append(cognitive_context.prompt_section)
     return "\n\n".join(sections)
 
 

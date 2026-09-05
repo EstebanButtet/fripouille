@@ -25,6 +25,7 @@ Pour une découverte pédagogique progressive du projet, lire
 | `src/assistant_ia/core/context.py` | Historique conversationnel en mémoire. |
 | `src/assistant_ia/intelligence/turn.py` | Séparation historique / tour courant. |
 | `src/assistant_ia/intelligence/model_client.py` | Client Ollama, interprétation puis génération. |
+| `src/assistant_ia/cognitive_context.py` | FRP-IA-13 : règles confirmées, rôle, état et perception bornés ; trace des sources conversationnelles. |
 | `src/assistant_ia/intelligence/prompt.py` | Prompts, règles opérationnelles et personnalité. |
 | `src/assistant_ia/interfaces/presentation.py` | Texte naturel sans plomberie technique. |
 | `src/assistant_ia/expressions.py` | FRP-IA-10 : intention expressive contrôlée, politique et expiration. |
@@ -85,8 +86,9 @@ l'apprentissage et de l'état interne.
 
 La consolidation FRP-IA-07 recalcule les preuves actives d'un candidat,
 ignore les expériences invalidées et conserve les liens exacts. Une règle
-n'est créée qu'après confirmation explicite de l'application et n'est pas
-injectée dans les prompts ; cette intégration appartient à FRP-IA-13.
+n'est créée qu'après confirmation explicite de l'application. FRP-IA-13
+sélectionne les règles pertinentes pour la conversation, hors rôle actif,
+avec contrôle de portée et de validité des preuves.
 
 ## Actions et sécurité
 

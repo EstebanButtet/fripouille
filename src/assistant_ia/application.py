@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import date
+from dataclasses import replace
 
 from assistant_ia.actions.defaults import (
     build_default_action_registry,
@@ -74,6 +75,9 @@ from assistant_ia.runtime import (
 )
 from assistant_ia.system.windows import WindowsApplicationLauncher
 from assistant_ia.roles import RoleService
+from assistant_ia.internal_state import InternalStateService
+from assistant_ia.social_vision import SocialVisionService
+from assistant_ia.cognitive_context import CognitiveContextProvider
 
 
 class ApplicationInitializationError(RuntimeError):
@@ -94,6 +98,8 @@ def build_default_assistant(
     windows_launcher: WindowsApplicationLauncher | None = None,
     identity: AssistantIdentity | None = None,
     person_context: ActivePersonContext | None = None,
+    audio_input: bool = False,
+    social_vision: SocialVisionService | None = None,
 ) -> AssistantCore:
     """Construire le coeur avec ses actions, sa mémoire et son modèle.
 
@@ -110,6 +116,10 @@ def build_default_assistant(
     """
     # Les validations précoces rendent les erreurs d'assemblage explicites.
     # Elles ne constituent pas des validations de messages utilisateur.
+    if not isinstance(audio_input, bool):
+        raise TypeError("Audio input capability must be boolean.")
+    if social_vision is not None and not isinstance(social_vision, SocialVisionService):
+        raise TypeError("Social vision must be an application service.")
     if database is not None and not isinstance(
         database,
         SQLiteDatabase,
@@ -211,6 +221,7 @@ def build_default_assistant(
         action_registry,
         automatic_memory_retrieval=model_client is None,
     )
+    capability_context = replace(capability_context, audio_input=audio_input)
 
     resolved_identity = (
         identity
@@ -236,10 +247,17 @@ def build_default_assistant(
             "the assistant identity."
         )
 
+    internal_state = InternalStateService()
+    vision = social_vision if social_vision is not None else SocialVisionService()
+    roles = RoleService(lambda: action_registry.action_names | {"conversation"}
+                        | ({"social_vision"} if vision.snapshot.status in {"present", "absent"} else set()))
+    learning_repository = BehavioralLearningRepository(resolved_database)
+    cognition = CognitiveContextProvider(internal_state, roles, vision, learning_repository)
     resolved_model_client = (
         model_client
         if model_client is not None
         else OllamaModelClient(
+            cognitive_context_provider=cognition,
             identity=resolved_identity,
             person_context=resolved_person_context,
             capability_context=capability_context,
@@ -256,8 +274,9 @@ def build_default_assistant(
         )
     )
 
-    roles = RoleService(lambda: action_registry.action_names | {"conversation"})
     return AssistantCore(
+        internal_state=internal_state,
+        social_vision=vision,
         roles=roles,
         model_client=resolved_model_client,
         context=context,
@@ -288,7 +307,7 @@ def build_default_assistant(
             else None
         ),
         behavioral_learning_service=BehavioralLearningService(
-            BehavioralLearningRepository(resolved_database),
+            learning_repository,
             resolved_person_context,
             role_id_provider=lambda: roles.active_id,
         ),
@@ -307,6 +326,8 @@ def build_default_runtime(
     person_context: ActivePersonContext | None = None,
     presenter: ResponsePresenter | None = None,
     diagnostic_reporter: DiagnosticReporter | None = None,
+    audio_input: bool = False,
+    social_vision: SocialVisionService | None = None,
 ) -> AssistantRuntime:
     """Envelopper un coeur assemblé dans la frontière d'interface runtime.
 
@@ -315,6 +336,8 @@ def build_default_runtime(
     tour. Aucun des deux ne participe à la décision métier du coeur.
     """
     assistant = build_default_assistant(
+        audio_input=audio_input,
+        social_vision=social_vision,
         database=database,
         model_client=model_client,
         context=context,

@@ -22,6 +22,13 @@ class ConsoleDiagnosticReporter:
         )
         print(f"[debug] intention={intent_name!r}")
         print(f"[debug] réponse_brute={diagnostics.raw_response!r}")
+        print(f"[debug] état={diagnostics.internal_state!r}, rôle={diagnostics.active_role_id!r}")
+        if diagnostics.cognitive_trace is not None:
+            trace = diagnostics.cognitive_trace
+            print(f"[debug] sources_sélectionnées: mémoires={trace.memory_ids}, "
+                  f"profils={trace.profile_fact_ids}, observations={trace.observation_ids}, "
+                  f"règles={trace.cognitive.rule_ids}, "
+                  f"perception={trace.cognitive.perception_included}")
 
         if diagnostics.memory_candidates:
             print(

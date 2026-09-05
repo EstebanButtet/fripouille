@@ -640,12 +640,18 @@ class BehavioralLearningRepository:
             ).fetchall())
         return _rule_from_row(row, sources)
 
-    def list_rules(self, *, person_id: int | None, include_invalidated: bool = False) -> tuple[ConfirmedBehavioralRule, ...]:
+    def list_rules(self, *, person_id: int | None, include_invalidated: bool = False,
+                   limit: int | None = None) -> tuple[ConfirmedBehavioralRule, ...]:
+        if person_id is not None:
+            person_id = _validate_identifier(person_id, "Person")
         clause = "person_id IS NULL" if person_id is None else "person_id = ?"
         params: tuple[object, ...] = () if person_id is None else (person_id,)
         status = "" if include_invalidated else " AND status = 'active'"
+        limit_clause = "" if limit is None else " LIMIT ?"
+        if limit is not None:
+            params += (_validate_limit(limit),)
         with self._database.connect() as connection:
-            rows = connection.execute(f"{_RULE_SELECT} WHERE {clause}{status} ORDER BY created_at DESC, id DESC", params).fetchall()
+            rows = connection.execute(f"{_RULE_SELECT} WHERE {clause}{status} ORDER BY created_at DESC, id DESC{limit_clause}", params).fetchall()
             return tuple(_rule_from_row(row, tuple(item[0] for item in connection.execute("SELECT experience_id FROM behavioral_rule_sources WHERE rule_id = ? ORDER BY experience_id", (row[0],)).fetchall())) for row in rows)
 
     def invalidate_confirmed_rule(self, rule_id: int, reason: str) -> ConfirmedBehavioralRule:

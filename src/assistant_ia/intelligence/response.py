@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from assistant_ia.intelligence.intent import Intent
+from assistant_ia.cognitive_context import CognitiveTrace
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +25,7 @@ class ModelResponse:
     content: str
     model: str
     intent: Intent
+    cognitive_trace: CognitiveTrace | None = None
 
     def __post_init__(self) -> None:
         """Valider les types et retirer les espaces extérieurs des textes."""
@@ -35,6 +37,8 @@ class ModelResponse:
 
         if not isinstance(self.intent, Intent):
             raise TypeError("Model response intent must be an Intent.")
+        if self.cognitive_trace is not None and not isinstance(self.cognitive_trace, CognitiveTrace):
+            raise TypeError("Model response trace must be application structured data.")
 
         normalized_content = self.content.strip()
         normalized_model = self.model.strip()

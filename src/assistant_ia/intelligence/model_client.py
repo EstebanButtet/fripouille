@@ -25,6 +25,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from assistant_ia.capabilities.context import CapabilityContext
+from assistant_ia.cognitive_context import CognitiveContextProvider, CognitiveContextSnapshot, CognitiveTrace
 from assistant_ia.intelligence.allocation import (
     ALLOCATION_PROPOSAL_SCHEMA,
     AllocationFormatError,
@@ -81,7 +82,10 @@ DEFAULT_MODEL = "qwen3.5:9b"
 DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
 DEFAULT_OLLAMA_TIMEOUT = 120.0
 DEFAULT_OLLAMA_CONTEXT_LENGTH = 4096
+COGNITIVE_OLLAMA_CONTEXT_LENGTH = 8192
 DEFAULT_OLLAMA_KEEP_ALIVE = "10m"
+MAX_MODEL_INPUT_CHARACTERS = 20000
+MAX_SYSTEM_PROMPT_CHARACTERS = 16000
 
 _OLLAMA_CHAT_PATH = "/api/chat"
 
@@ -130,6 +134,7 @@ class OllamaModelClient:
             ContextualMemoryRetriever | None
         ) = None,
         social_context_provider: PersonSocialContextProvider | None = None,
+        cognitive_context_provider: CognitiveContextProvider | None = None,
     ) -> None:
         """Créer le client avec une configuration locale explicite.
 
@@ -204,6 +209,8 @@ class OllamaModelClient:
             )
 
         normalized_model = model.strip()
+        if cognitive_context_provider is not None and not isinstance(cognitive_context_provider, CognitiveContextProvider):
+            raise TypeError("Cognitive context must be an application provider.")
         normalized_base_url = base_url.strip().rstrip("/")
 
         if not normalized_model:
@@ -251,6 +258,7 @@ class OllamaModelClient:
             contextual_memory_retriever
         )
         self._social_context_provider = social_context_provider
+        self._cognitive_context_provider = cognitive_context_provider
 
         if (
             self._capability_context.automatic_memory_retrieval
@@ -346,12 +354,18 @@ class OllamaModelClient:
             )
         )
         social_context = self._retrieve_social_context()
+        cognitive_context = (
+            self._cognitive_context_provider.build(
+                turn.current_user_message.content, self._person_context.active_person_id)
+            if self._cognitive_context_provider is not None else CognitiveContextSnapshot()
+        )
 
         conversation_content, conversation_model = (
             self._generate_conversation(
                 turn,
                 social_context=social_context,
                 contextual_memories=contextual_memories,
+                cognitive_context=cognitive_context,
             )
         )
 
@@ -359,6 +373,13 @@ class OllamaModelClient:
             content=conversation_content,
             model=conversation_model,
             intent=intent,
+            cognitive_trace=CognitiveTrace(
+                memory_ids=tuple(item.memory.id for item in contextual_memories),
+                profile_fact_ids=tuple(item.id for item in social_context.profile_facts) if social_context else (),
+                observation_ids=tuple(item.id for item in social_context.observations) if social_context else (),
+                relationship_included=social_context is not None and social_context.relationship is not None,
+                cognitive=cognitive_context,
+            ),
         )
 
     def _interpret_turn(
@@ -576,6 +597,7 @@ class OllamaModelClient:
         *,
         social_context: SocialContext | None = None,
         contextual_memories: tuple[RetrievedMemory, ...] = (),
+        cognitive_context: CognitiveContextSnapshot | None = None,
     ) -> tuple[str, str]:
         """Générer uniquement le texte naturel d'une conversation.
 
@@ -590,6 +612,7 @@ class OllamaModelClient:
                     self._person_context,
                     self._capability_context,
                     social_context=social_context,
+                    cognitive_context=cognitive_context,
                     contextual_memories=(
                         bound_contextual_memories(
                             contextual_memories
@@ -607,6 +630,8 @@ class OllamaModelClient:
             },
         }
 
+        if self._cognitive_context_provider is not None:
+            payload["options"]["num_ctx"] = COGNITIVE_OLLAMA_CONTEXT_LENGTH
         model, content = self._request_ollama(
             payload
         )
@@ -669,6 +694,14 @@ class OllamaModelClient:
         un second marqueur système délimite explicitement le tour courant afin
         que les anciens messages ne soient pas confondus avec la demande.
         """
+        if len(system_prompt) > MAX_SYSTEM_PROMPT_CHARACTERS:
+            raise ModelClientError("System context exceeds the application prompt budget.")
+        history = turn.history
+        input_size = len(system_prompt) + len(turn.current_user_message.content)
+        if input_size + sum(len(m.content) for m in history) + len(CURRENT_TURN_CONTEXT_PROMPT) > MAX_MODEL_INPUT_CHARACTERS:
+            history = ()
+        if input_size > MAX_MODEL_INPUT_CHARACTERS:
+            raise ModelClientError("Current message exceeds the application prompt budget.")
         messages = [
             {
                 "role": "system",
@@ -679,11 +712,11 @@ class OllamaModelClient:
                     "role": message.role,
                     "content": message.content,
                 }
-                for message in turn.history
+                for message in history
             ],
         ]
 
-        if turn.history:
+        if history:
             messages.append(
                 {
                     "role": "system",

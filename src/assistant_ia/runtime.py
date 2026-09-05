@@ -14,9 +14,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol
+from threading import Lock
 
-from assistant_ia.core.assistant import AssistantCore
+from assistant_ia.core.assistant import AssistantCore, AssistantCoreError
 from assistant_ia.expressions import ExpressionController, expression_for_state
+from assistant_ia.cognitive_context import CognitiveTrace
+from assistant_ia.internal_state import InternalStateSnapshot
 from assistant_ia.actions.result import ActionExecutionResult
 from assistant_ia.intelligence.intent import Intent
 from assistant_ia.interfaces.presentation import (
@@ -42,6 +45,9 @@ class TurnDiagnostics:
     action_result: ActionExecutionResult | None
     memory_candidates: tuple[MemoryCandidate, ...]
     memory_promotion_proposal: MemoryPromotionProposal | None
+    cognitive_trace: CognitiveTrace | None = None
+    internal_state: InternalStateSnapshot | None = None
+    active_role_id: str | None = None
 
 
 class DiagnosticReporter(Protocol):
@@ -61,6 +67,10 @@ class ResponsePresenter(Protocol):
 
     def present(self, response: str) -> None:
         """Afficher ou transmettre une réponse déjà résolue."""
+
+
+class RuntimeBusyError(AssistantCoreError):
+    """Un autre tour détient déjà le coeur partagé par les interfaces."""
 
 
 class AssistantRuntime:
@@ -87,6 +97,7 @@ class AssistantRuntime:
         self._presenter = presenter
         self._diagnostic_reporter = diagnostic_reporter
         self.expressions = ExpressionController()
+        self._turn_lock = Lock()
 
     @property
     def assistant(self) -> AssistantCore:
@@ -97,6 +108,15 @@ class AssistantRuntime:
         self,
         user_message: str,
     ) -> str:
+        """Refuser les tours concurrents provenant de plusieurs interfaces."""
+        if not self._turn_lock.acquire(blocking=False):
+            raise RuntimeBusyError("A conversation turn is already running.")
+        try:
+            return self._process_message(user_message)
+        finally:
+            self._turn_lock.release()
+
+    def _process_message(self, user_message: str) -> str:
         """Traiter un tour, présenter sa réponse et retourner le même texte.
 
         Effets de bord possibles : mise à jour du contexte par le coeur,
@@ -112,6 +132,9 @@ class AssistantRuntime:
         # 2. La photographie est construite immédiatement après le traitement
         # pour que tous ses champs décrivent exactement le même tour.
         diagnostics = TurnDiagnostics(
+            cognitive_trace=self._assistant.last_cognitive_trace,
+            internal_state=self._assistant.internal_state.snapshot,
+            active_role_id=self._assistant.roles.active_id,
             user_message=user_message,
             raw_response=raw_response,
             intent=self._assistant.last_intent,
@@ -151,5 +174,10 @@ class AssistantRuntime:
 
     def reset_conversation(self) -> None:
         """Demander au coeur d'oublier l'état conversationnel temporaire."""
-        self._assistant.reset_conversation()
-        self.expressions.reset()
+        if not self._turn_lock.acquire(blocking=False):
+            raise RuntimeBusyError("Cannot reset a running conversation turn.")
+        try:
+            self._assistant.reset_conversation()
+            self.expressions.reset()
+        finally:
+            self._turn_lock.release()

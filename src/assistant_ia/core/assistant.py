@@ -34,6 +34,8 @@ from assistant_ia.actions.result import ActionExecutionResult
 from assistant_ia.core.context import ConversationContext
 from assistant_ia.internal_state import InternalStateService, StateEvent
 from assistant_ia.roles import RoleService
+from assistant_ia.social_vision import SocialVisionService
+from assistant_ia.cognitive_context import CognitiveTrace
 from assistant_ia.identity.defaults import build_default_identity
 from assistant_ia.intelligence.intent import Intent
 from assistant_ia.intelligence.memory_candidates import (
@@ -159,6 +161,7 @@ class AssistantCore:
         ) = None,
         internal_state: InternalStateService | None = None,
         roles: RoleService | None = None,
+        social_vision: SocialVisionService | None = None,
     ) -> None:
         """Créer le coeur avec les dépendances fournies ou leurs valeurs par défaut.
 
@@ -208,6 +211,10 @@ class AssistantCore:
             )
 
         # Cette identité est stable et sert seulement aux valeurs par défaut.
+        for component, expected in ((internal_state, InternalStateService),
+                                    (roles, RoleService), (social_vision, SocialVisionService)):
+            if component is not None and not isinstance(component, expected):
+                raise TypeError(f"Assistant component requires {expected.__name__}.")
         # Aucune réponse du modèle ne peut la modifier.
         default_identity = build_default_identity()
 
@@ -270,6 +277,8 @@ class AssistantCore:
         self.internal_state = internal_state if internal_state is not None else InternalStateService()
         self.roles = roles if roles is not None else RoleService(
             lambda: self._action_registry.action_names | {"conversation"})
+        self.social_vision = social_vision if social_vision is not None else SocialVisionService()
+        self.last_cognitive_trace: CognitiveTrace | None = None
         self._state_person = (self._person_context.active_person_id, self._person_context.active_person)
 
     @property
@@ -357,6 +366,7 @@ class AssistantCore:
         self.internal_state.transition(StateEvent.TURN_STARTED)
         # Une confirmation peut retourner tôt : ne pas réutiliser son ancien résultat.
         self._last_action_result = None
+        self.last_cognitive_trace = None
         try:
             response = self._process_message(user_message)
         except Exception:
@@ -376,11 +386,17 @@ class AssistantCore:
             self.internal_state.transition(StateEvent.TURN_COMPLETED)
         return response
 
-    def _sync_state_person(self) -> None:
+    def _sync_state_person(self, current_message: str | None = None) -> None:
         person = (self._person_context.active_person_id, self._person_context.active_person)
         if person != self._state_person:
             self.internal_state.transition(StateEvent.PERSON_CHANGED)
             self.roles.reset()
+            # L'historique de l'ancien locuteur ne fuit pas dans le prompt suivant.
+            self._context.clear()
+            # Les confirmations restent jusqu'au contrôle de portée existant :
+            # il doit refuser un « oui » périmé, sans le renvoyer au modèle.
+            if current_message is not None:
+                self._context.add_user_message(current_message)
             self._state_person = person
 
     def _process_message(self, user_message: str) -> str:
@@ -445,7 +461,7 @@ class AssistantCore:
                 return resolution_response
 
         # 3. Le client produit à la fois un texte et une intention structurée.
-        self._sync_state_person()
+        self._sync_state_person(user_message)
         # Le coeur ne fait confiance qu'aux objets déjà validés par ce client.
         try:
             model_response = self._model_client.generate_response(
@@ -463,6 +479,7 @@ class AssistantCore:
             user_message,
         )
         self._last_intent = resolved_intent
+        self.last_cognitive_trace = model_response.cognitive_trace
 
         # 4. Une conversation utilise le texte généré ; une intention d'action
         # passe obligatoirement par le registre applicatif.
@@ -567,7 +584,10 @@ class AssistantCore:
         self._context.clear()
         self.internal_state.transition(StateEvent.RESET)
         self.roles.reset()
+        self.social_vision.stop()
+        self.last_cognitive_trace = None
         self._person_context.reset()
+        self._state_person = (self._person_context.active_person_id, self._person_context.active_person)
         self._last_intent = None
         self._last_action_result = None
         self._last_person_resolution = None

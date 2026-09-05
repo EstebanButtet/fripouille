@@ -97,10 +97,12 @@ def run_terminal(*, debug: bool = False, voice: bool = False) -> None:
             runtime = build_default_runtime(
                 confirmation_handler=request_terminal_confirmation,
                 diagnostic_reporter=ConsoleDiagnosticReporter(),
+                **({"audio_input": True} if voice else {}),
             )
         else:
             runtime = build_default_runtime(
                 confirmation_handler=request_terminal_confirmation,
+                **({"audio_input": True} if voice else {}),
             )
     except ApplicationInitializationError:
         display_assistant_message(
