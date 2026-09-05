@@ -57,6 +57,7 @@ l'apprentissage et de l'état interne.
 | `src/assistant_ia/people/relationship_repository.py` | Relation conversationnelle optionnelle par personne. |
 | `src/assistant_ia/people/observation_repository.py` | Observations multiples, privées et inspectables. |
 | `src/assistant_ia/people/social_context.py` | Sélection sociale bornée de la personne active. |
+| `src/assistant_ia/social_vision.py` | FRP-IA-11 : perceptions éphémères anonymes, provider explicite, expiration à 2 s. |
 | `src/assistant_ia/intelligence/profile_fact_candidates.py` | Analyse Ollama bornée des candidats de profil. |
 
 ## Mémoire
