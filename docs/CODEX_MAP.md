@@ -15,6 +15,7 @@ Pour une découverte pédagogique progressive du projet, lire
 | `src/assistant_ia/application.py` | Assemblage de `AssistantCore` et `AssistantRuntime`. |
 | `src/assistant_ia/runtime.py` | Frontière des interfaces, réponse user-facing et diagnostic du tour. |
 | `src/assistant_ia/internal_state.py` | FRP-IA-08 : état fonctionnel de session et transitions applicatives déterministes. |
+| `src/assistant_ia/roles.py` | FRP-IA-12 : catalogue fonctionnel, activation explicite et contrôle des capacités. |
 
 ## Conversation
 

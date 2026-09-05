@@ -56,8 +56,12 @@ class BehavioralAttempt:
     objective: str
     strategy: str
     started_at: datetime
+    role_id: str | None = None
 
     def __post_init__(self) -> None:
+        if self.role_id is not None:
+            if not isinstance(self.role_id, str) or not self.role_id.strip() or len(self.role_id) > 32:
+                raise ValueError("Attempt role must be a bounded application identifier.")
         object.__setattr__(
             self,
             "person_id",

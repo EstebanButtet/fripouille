@@ -46,6 +46,7 @@ class BehavioralLearningService:
         repository: BehavioralLearningRepository,
         person_context: ActivePersonContext,
         clock: Callable[[], datetime] | None = None,
+        role_id_provider: Callable[[], str | None] | None = None,
     ) -> None:
         if not isinstance(repository, BehavioralLearningRepository):
             raise TypeError(
@@ -60,21 +61,25 @@ class BehavioralLearningService:
         if clock is not None and not callable(clock):
             raise TypeError("Behavioral learning service clock must be callable.")
         self._clock = clock if clock is not None else lambda: datetime.now(timezone.utc)
+        self._role_id_provider = role_id_provider if role_id_provider is not None else lambda: None
 
     def begin_active_person_attempt(self, *, context: str, objective: str, strategy: str) -> BehavioralAttempt:
         return BehavioralAttempt(
             person_id=self._require_active_person_id(), context=context,
             objective=objective, strategy=strategy,
             started_at=_normalized_now(self._clock()),
+            role_id=self._role_id_provider(),
         )
 
     def begin_global_attempt(self, *, context: str, objective: str, strategy: str) -> BehavioralAttempt:
         return BehavioralAttempt(
             person_id=None, context=context, objective=objective,
             strategy=strategy, started_at=_normalized_now(self._clock()),
+            role_id=self._role_id_provider(),
         )
 
     def record_active_person_outcome(self, attempt: BehavioralAttempt, outcome: ExperienceOutcome, *, provenance: ExperienceProvenance, evaluation: str | None = None) -> BehavioralExperience:
+        self._require_default_role()
         person_id = self._require_active_person_id()
         self._validate_attempt(attempt, person_id)
         self._validate_outcome(outcome)
@@ -85,6 +90,7 @@ class BehavioralLearningService:
         )
 
     def record_global_outcome(self, attempt: BehavioralAttempt, outcome: ExperienceOutcome, *, provenance: ExperienceProvenance, evaluation: str | None = None) -> BehavioralExperience:
+        self._require_default_role()
         self._validate_attempt(attempt, None)
         self._validate_outcome(outcome)
         return self._repository.create_experience(
@@ -126,6 +132,7 @@ class BehavioralLearningService:
         evaluation: str | None = None,
     ) -> BehavioralExperience:
         """Enregistrer pour la personne persistante choisie par l'application."""
+        self._require_default_role()
         return self._repository.create_experience(
             person_id=self._require_active_person_id(),
             context=context,
@@ -147,6 +154,7 @@ class BehavioralLearningService:
         evaluation: str | None = None,
     ) -> BehavioralExperience:
         """Enregistrer une expérience explicitement non liée à une personne."""
+        self._require_default_role()
         return self._repository.create_experience(
             person_id=None,
             context=context,
@@ -296,6 +304,7 @@ class BehavioralLearningService:
         return self._confirm(candidate, summary, confirmation_note)
 
     def _confirm(self, candidate: BehavioralLessonCandidate, summary: BehavioralConsolidation, note: str) -> ConfirmedBehavioralRule:
+        self._require_default_role()
         if not isinstance(note, str) or not note.strip():
             raise ValueError("Rule confirmation note cannot be empty.")
         return self._repository.create_confirmed_rule(
@@ -319,10 +328,16 @@ class BehavioralLearningService:
             )
         return person_id
 
+    def _require_default_role(self) -> None:
+        if self._role_id_provider() is not None:
+            raise BehavioralLearningScopeError("Role-specific persistence is unavailable in schema v10.")
+
     @staticmethod
     def _validate_attempt(attempt: BehavioralAttempt, expected_person_id: int | None) -> None:
         if not isinstance(attempt, BehavioralAttempt):
             raise TypeError("Learning attempt must be BehavioralAttempt.")
+        if attempt.role_id is not None:
+            raise BehavioralLearningScopeError("A role-specific attempt cannot become a global rule.")
         if attempt.person_id != expected_person_id:
             raise BehavioralLearningScopeError(
                 "Learning attempt does not belong to the requested person scope."

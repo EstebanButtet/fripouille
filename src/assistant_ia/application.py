@@ -73,6 +73,7 @@ from assistant_ia.runtime import (
     ResponsePresenter,
 )
 from assistant_ia.system.windows import WindowsApplicationLauncher
+from assistant_ia.roles import RoleService
 
 
 class ApplicationInitializationError(RuntimeError):
@@ -255,7 +256,9 @@ def build_default_assistant(
         )
     )
 
+    roles = RoleService(lambda: action_registry.action_names | {"conversation"})
     return AssistantCore(
+        roles=roles,
         model_client=resolved_model_client,
         context=context,
         action_registry=action_registry,
@@ -287,6 +290,7 @@ def build_default_assistant(
         behavioral_learning_service=BehavioralLearningService(
             BehavioralLearningRepository(resolved_database),
             resolved_person_context,
+            role_id_provider=lambda: roles.active_id,
         ),
     )
 

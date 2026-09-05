@@ -33,6 +33,7 @@ from assistant_ia.actions.registry import (
 from assistant_ia.actions.result import ActionExecutionResult
 from assistant_ia.core.context import ConversationContext
 from assistant_ia.internal_state import InternalStateService, StateEvent
+from assistant_ia.roles import RoleService
 from assistant_ia.identity.defaults import build_default_identity
 from assistant_ia.intelligence.intent import Intent
 from assistant_ia.intelligence.memory_candidates import (
@@ -157,6 +158,7 @@ class AssistantCore:
             BehavioralLearningService | None
         ) = None,
         internal_state: InternalStateService | None = None,
+        roles: RoleService | None = None,
     ) -> None:
         """Créer le coeur avec les dépendances fournies ou leurs valeurs par défaut.
 
@@ -266,6 +268,8 @@ class AssistantCore:
         ) = None
         self._behavioral_learning_service = behavioral_learning_service
         self.internal_state = internal_state if internal_state is not None else InternalStateService()
+        self.roles = roles if roles is not None else RoleService(
+            lambda: self._action_registry.action_names | {"conversation"})
         self._state_person = (self._person_context.active_person_id, self._person_context.active_person)
 
     @property
@@ -376,6 +380,7 @@ class AssistantCore:
         person = (self._person_context.active_person_id, self._person_context.active_person)
         if person != self._state_person:
             self.internal_state.transition(StateEvent.PERSON_CHANGED)
+            self.roles.reset()
             self._state_person = person
 
     def _process_message(self, user_message: str) -> str:
@@ -413,6 +418,10 @@ class AssistantCore:
         self._last_profile_fact_candidates = ()
         self._last_profile_fact_promotion_proposal = None
         current_user_message = self._context.add_user_message(user_message)
+        role_response = self.roles.handle_request(current_user_message.content)
+        if role_response is not None:
+            self._context.add_assistant_message(role_response)
+            return role_response
 
         # La détection de présentation est déterministe et limitée au message
         # explicite ; elle n'autorise pas le modèle à inventer une identité.
@@ -557,6 +566,7 @@ class AssistantCore:
         """
         self._context.clear()
         self.internal_state.transition(StateEvent.RESET)
+        self.roles.reset()
         self._person_context.reset()
         self._last_intent = None
         self._last_action_result = None
